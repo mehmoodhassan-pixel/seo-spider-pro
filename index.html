@@ -1,705 +1,1204 @@
-import { useState, useCallback, useRef } from "react";
-
-const MODEL = "claude-sonnet-4-20250514";
-
-// ── helpers ──────────────────────────────────────────────────────────────────
-const statusColor = (code) => {
-  if (!code) return "#888";
-  if (code >= 200 && code < 300) return "#4ade80";
-  if (code >= 300 && code < 400) return "#facc15";
-  if (code >= 400) return "#f87171";
-  return "#888";
-};
-const pill = (val, warn, err) => {
-  if (!val && val !== 0) return <span style={{ color: "#555" }}>—</span>;
-  const n = typeof val === "string" ? val.length : val;
-  const color = n > err ? "#f87171" : n > warn ? "#facc15" : "#4ade80";
-  return <span style={{ color, fontWeight: 600 }}>{val}</span>;
-};
-const truncate = (s, n = 60) => (s && s.length > n ? s.slice(0, n) + "…" : s || "—");
-
-// ── AI Crawl via Anthropic API ────────────────────────────────────────────────
-async function crawlUrl(url) {
-  const prompt = `You are an expert SEO technical auditor. Analyze the website at: ${url}
-
-Use web search to fetch and inspect this page. Return ONLY a valid JSON object (no markdown, no explanation) with this exact structure:
-
-{
-  "url": "${url}",
-  "status_code": 200,
-  "title": "page title here",
-  "title_length": 45,
-  "meta_description": "meta description text",
-  "meta_description_length": 155,
-  "h1": "main h1 heading",
-  "h2_count": 5,
-  "h3_count": 3,
-  "word_count": 850,
-  "canonical": "https://...",
-  "robots_meta": "index, follow",
-  "lang": "en",
-  "charset": "UTF-8",
-  "content_type": "text/html",
-  "image_count": 12,
-  "images_missing_alt": 3,
-  "internal_links": 25,
-  "external_links": 8,
-  "page_size_kb": 145,
-  "load_time_ms": 980,
-  "is_https": true,
-  "has_canonical": true,
-  "has_schema": true,
-  "schema_types": ["WebPage", "Organization"],
-  "open_graph": true,
-  "twitter_card": true,
-  "viewport_meta": true,
-  "hreflang": false,
-  "noindex": false,
-  "nofollow": false,
-  "broken_links": [],
-  "redirect_chain": [],
-  "issues": [
-    { "type": "warning", "message": "Meta description is too long (>155 chars)" }
-  ],
-  "opportunities": [
-    { "type": "info", "message": "Add structured data for better rich results" }
-  ],
-  "discovered_urls": [
-    "https://example.com/about",
-    "https://example.com/contact",
-    "https://example.com/blog"
-  ],
-  "headings_structure": {
-    "h1_count": 1,
-    "h2_count": 5,
-    "h3_count": 3,
-    "h4_count": 1,
-    "multiple_h1": false,
-    "missing_h1": false
-  },
-  "security": {
-    "https": true,
-    "hsts": true,
-    "mixed_content": false
-  },
-  "performance": {
-    "estimated_lcp_ms": 1200,
-    "estimated_fid_ms": 50,
-    "cls_score": 0.05,
-    "render_blocking_resources": 2
-  },
-  "social": {
-    "og_title": "...",
-    "og_description": "...",
-    "og_image": "..."
-  },
-  "images": [
-    { "src": "/logo.png", "alt": "Company Logo", "width": 200, "height": 60, "size_kb": 15 },
-    { "src": "/hero.jpg", "alt": "", "width": 1200, "height": 600, "size_kb": 280 }
-  ],
-  "links": [
-    { "href": "/about", "text": "About Us", "type": "internal", "status": 200 },
-    { "href": "https://twitter.com", "text": "Twitter", "type": "external", "status": 200 }
-  ],
-  "readability_score": 68,
-  "spelling_issues": 0,
-  "structured_data_valid": true
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>SEO Spider Pro — Website Crawler & Audit Tool</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐸</text></svg>"/>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{font-family:'Outfit',sans-serif;background:#060b14;color:#b8c8d8;font-size:14px;display:flex;flex-direction:column}
+a{color:inherit;text-decoration:none}
+button{font-family:'Outfit',sans-serif;cursor:pointer}
+input,select{font-family:'Outfit',sans-serif}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:#060b14}
+::-webkit-scrollbar-thumb{background:#1a2e44;border-radius:3px}
+:root{
+  --bg0:#060b14;--bg1:#080e1c;--bg2:#0a1220;--bg3:#0d1828;
+  --border:#0f2035;--border2:#162840;
+  --green:#22c55e;--green2:#16a34a;--green-dim:rgba(34,197,94,.12);
+  --red:#f87171;--red-dim:rgba(248,113,113,.1);
+  --yellow:#facc15;--yellow-dim:rgba(250,204,21,.1);
+  --blue:#60a5fa;--blue-dim:rgba(96,165,250,.1);
+  --orange:#fb923c;
+  --text0:#e8f0fe;--text1:#b8c8d8;--text2:#6a8aa0;--text3:#2a4a60;
+  --mono:'IBM Plex Mono',monospace;
 }
+#titlebar{background:var(--bg1);border-bottom:1px solid var(--border);height:46px;display:flex;align-items:center;gap:12px;padding:0 18px;flex-shrink:0;user-select:none;}
+#titlebar .logo{display:flex;align-items:center;gap:8px}
+#titlebar .logo-icon{font-size:1.35rem}
+#titlebar .logo-name{font-size:.95rem;font-weight:700;color:var(--text0)}
+#titlebar .logo-tag{font-size:.62rem;color:var(--green);background:var(--green-dim);border:1px solid rgba(34,197,94,.25);padding:2px 8px;border-radius:20px;font-weight:600}
+#titlebar .nav{margin-left:auto;display:flex;gap:2px}
+#titlebar .nav button{background:none;border:none;color:var(--text3);font-size:.75rem;padding:5px 10px;border-radius:4px;transition:all .15s}
+#titlebar .nav button:hover{background:var(--bg3);color:var(--text2)}
+#toolbar{background:var(--bg1);border-bottom:1px solid var(--border);padding:8px 18px;display:flex;align-items:center;gap:8px;flex-shrink:0;flex-wrap:wrap;}
+#toolbar label{font-size:.72rem;color:var(--text3);white-space:nowrap}
+#url-input{flex:1;min-width:200px;max-width:400px;background:var(--bg3);border:1px solid var(--border2);color:var(--text0);border-radius:6px;padding:6px 12px;font-size:.82rem;outline:none;font-family:var(--mono);transition:border-color .2s;}
+#url-input:focus{border-color:var(--green);box-shadow:0 0 0 2px rgba(34,197,94,.12)}
+#url-input::placeholder{color:var(--text3)}
+.tb-select{background:var(--bg3);border:1px solid var(--border2);color:var(--text1);border-radius:6px;padding:6px 8px;font-size:.76rem;outline:none;cursor:pointer;}
+#btn-start{background:linear-gradient(135deg,#15803d,#22c55e);color:#fff;border:none;border-radius:6px;padding:7px 22px;font-weight:700;font-size:.8rem;display:flex;align-items:center;gap:6px;transition:all .2s;white-space:nowrap;}
+#btn-start:hover{transform:translateY(-1px);box-shadow:0 4px 15px rgba(34,197,94,.25)}
+#btn-start.stopping{background:linear-gradient(135deg,#7f1d1d,#ef4444)}
+#btn-export{background:var(--bg3);border:1px solid var(--border2);color:var(--text2);border-radius:6px;padding:7px 14px;font-size:.76rem;transition:all .2s;}
+#btn-export:hover{border-color:var(--green);color:var(--green)}
+#filter-input{background:var(--bg3);border:1px solid var(--border2);color:var(--text1);border-radius:6px;padding:6px 10px;font-size:.76rem;outline:none;width:140px;}
+#filter-input::placeholder{color:var(--text3)}
+#filter-input:focus{border-color:var(--blue)}
+#filter-status{background:var(--bg3);border:1px solid var(--border2);color:var(--text1);border-radius:6px;padding:6px 8px;font-size:.74rem;outline:none;cursor:pointer;}
+#progressbar{background:var(--bg1);border-bottom:1px solid var(--border);padding:5px 18px;flex-shrink:0;display:none;}
+#progressbar.visible{display:block}
+#prog-inner{display:flex;align-items:center;gap:10px}
+#prog-track{flex:1;background:var(--bg3);border-radius:4px;height:5px;overflow:hidden}
+#prog-fill{width:0%;height:100%;background:linear-gradient(90deg,#1d4ed8,#22c55e);border-radius:4px;transition:width .4s ease}
+#prog-label{font-size:.68rem;color:var(--text3);font-family:var(--mono);min-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#tabbar{background:var(--bg1);border-bottom:1px solid var(--border);display:flex;overflow-x:auto;padding:0 14px;flex-shrink:0;}
+#tabbar::-webkit-scrollbar{height:3px}
+.tab-btn{background:none;border:none;border-bottom:2px solid transparent;color:var(--text3);padding:9px 12px;font-size:.72rem;font-weight:500;white-space:nowrap;transition:all .15s;}
+.tab-btn:hover{color:var(--text2)}
+.tab-btn.active{border-bottom-color:var(--green);color:var(--green);font-weight:700}
+#main{display:flex;flex:1;overflow:hidden}
+#content{flex:1;overflow-y:auto;padding:14px}
+#detail-panel{width:0;border-left:1px solid var(--border);background:var(--bg1);overflow-y:auto;transition:width .2s;flex-shrink:0;}
+#detail-panel.open{width:300px}
+#detail-inner{padding:14px;min-width:300px}
+.stat-grid{display:grid;gap:10px;margin-bottom:14px}
+.stat-grid-4{grid-template-columns:repeat(4,1fr)}
+.stat-grid-3{grid-template-columns:repeat(3,1fr)}
+.stat-grid-5{grid-template-columns:repeat(5,1fr)}
+.stat-card{background:var(--bg2);border:1px solid var(--border2);border-radius:9px;padding:13px 15px;}
+.stat-val{font-size:1.7rem;font-weight:800;font-family:var(--mono);line-height:1;margin-bottom:5px}
+.stat-lbl{font-size:.68rem;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.stat-sub{font-size:.63rem;color:var(--text3);margin-top:2px}
+.vtable-wrap{border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.vtable-head{display:flex;background:#0a1828;border-bottom:2px solid var(--border2);position:sticky;top:0;z-index:5;}
+.vtable-head-cell{padding:7px 10px;font-size:.67rem;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;flex-shrink:0;font-family:var(--mono);border-right:1px solid var(--border);cursor:pointer;user-select:none;transition:color .15s;}
+.vtable-head-cell:hover{color:var(--text2)}
+.vtable-head-cell:last-child{border-right:none}
+.vtable-scroll{height:420px;overflow-y:auto;overflow-x:hidden}
+.vtable-row{display:flex;align-items:center;border-bottom:1px solid #0a1525;cursor:pointer;transition:background .1s;}
+.vtable-row:hover{background:#0f1e30!important}
+.vtable-row.selected{background:#122040!important}
+.vtable-cell{padding:0 10px;font-size:.71rem;color:var(--text1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0;height:32px;display:flex;align-items:center;border-right:1px solid #090f1a;}
+.vtable-cell:last-child{border-right:none}
+.vtable-empty{text-align:center;padding:50px;color:var(--text3);font-size:.85rem}
+#statusbar{background:#04080f;border-top:1px solid #090f1a;padding:3px 18px;display:flex;align-items:center;gap:18px;flex-shrink:0;overflow:hidden;}
+.sb-item{font-size:.63rem;color:var(--text3);font-family:var(--mono);white-space:nowrap}
+.sb-item span{color:var(--text2);font-weight:600}
+#sb-right{margin-left:auto;font-size:.6rem;color:#1a3050}
+#detail-inner h3{font-size:.78rem;color:var(--text0);font-weight:700;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
+#detail-inner h3 button{background:none;border:none;color:var(--text3);font-size:1.1rem;cursor:pointer;line-height:1;padding:0}
+.det-url{font-size:.67rem;color:var(--blue);word-break:break-all;line-height:1.4;margin-bottom:12px;display:block}
+.det-row{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #090f1a;gap:6px}
+.det-key{font-size:.66rem;color:var(--text3);flex-shrink:0}
+.det-val{font-size:.66rem;color:var(--text2);text-align:right;font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px}
+.det-section{margin-top:12px;margin-bottom:6px;font-size:.65rem;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em}
+.issue-pill{font-size:.66rem;padding:4px 8px;border-radius:4px;margin-bottom:4px;border-left:3px solid;line-height:1.4;display:block;}
+.issue-row{display:flex;align-items:flex-start;gap:10px;padding:7px 14px;border-bottom:1px solid #090f1a;}
+.issue-msg{font-size:.72rem;color:var(--text1);line-height:1.4}
+.issue-url{font-size:.66rem;color:#2a5070;margin-top:2px}
+.issue-badge{font-size:.6rem;font-weight:700;padding:2px 7px;border-radius:10px;white-space:nowrap;margin-left:auto;flex-shrink:0;}
+#welcome{text-align:center;padding:60px 20px}
+#welcome .w-icon{font-size:5rem;margin-bottom:18px;display:block}
+#welcome h2{font-size:1.2rem;color:#1e3a55;font-weight:600;margin-bottom:8px}
+#welcome p{font-size:.82rem;color:#0f2035;max-width:480px;margin:0 auto 30px;line-height:1.6}
+.feature-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:560px;margin:0 auto}
+.feature-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px 10px;text-align:center}
+.feature-card .fi{font-size:1.4rem;margin-bottom:6px}
+.feature-card .ft{font-size:.72rem;color:#2a5070;font-weight:600}
+.feature-card .fd{font-size:.64rem;color:#1a3050;margin-top:3px}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.spinning{animation:spin .9s linear infinite;display:inline-block}
+.pulsing{animation:pulse 1.4s ease infinite}
+#modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;align-items:center;justify-content:center}
+#modal-overlay.show{display:flex}
+#modal{background:#0a1525;border:1px solid var(--border2);border-radius:12px;padding:28px;max-width:500px;width:92%;box-shadow:0 20px 60px rgba(0,0,0,.5);max-height:80vh;overflow-y:auto;}
+#modal h2{font-size:1rem;color:var(--text0);margin-bottom:16px;font-weight:700}
+#modal p{font-size:.8rem;color:var(--text2);line-height:1.6;margin-bottom:10px}
+#modal ul{font-size:.78rem;color:var(--text2);line-height:1.8;padding-left:18px;margin-bottom:16px}
+#modal .close-btn{background:var(--bg3);border:1px solid var(--border2);color:var(--text1);border-radius:6px;padding:7px 18px;font-size:.8rem;font-weight:600;cursor:pointer}
+#modal .close-btn:hover{border-color:var(--green);color:var(--green)}
+/* proxy status */
+#proxy-status{font-size:.68rem;color:var(--text3);font-family:var(--mono)}
+@media(max-width:768px){.stat-grid-4{grid-template-columns:repeat(2,1fr)}.stat-grid-5{grid-template-columns:repeat(2,1fr)}#detail-panel.open{width:260px}.feature-grid{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
 
-Be as accurate as possible based on what you find. If you can't determine a value, use a sensible default.`;
+<div id="titlebar">
+  <div class="logo">
+    <span class="logo-icon">🐸</span>
+    <span class="logo-name">SEO Spider Pro</span>
+    <span class="logo-tag">REAL CRAWLER · JS-READY</span>
+  </div>
+  <div class="nav">
+    <span id="proxy-status"></span>
+    <button onclick="showHelp()">Help</button>
+    <button onclick="showAbout()">About</button>
+  </div>
+</div>
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: 2000,
-      tools: [{ type: "web_search_20250305", name: "web_search" }],
-      messages: [{ role: "user", content: prompt }]
-    })
-  });
-  const data = await response.json();
-  const text = data.content.map(b => b.type === "text" ? b.text : "").join("");
-  const clean = text.replace(/```json|```/g, "").trim();
-  const jsonMatch = clean.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("No JSON returned");
-  return JSON.parse(jsonMatch[0]);
-}
+<div id="toolbar">
+  <label>URL:</label>
+  <input id="url-input" type="url" placeholder="https://www.foodmamba.com/" autocomplete="off" spellcheck="false"/>
+  <select class="tb-select" id="max-pages-sel">
+    <option value="10">10 pages</option>
+    <option value="25">25 pages</option>
+    <option value="50">50 pages</option>
+    <option value="100" selected>100 pages</option>
+    <option value="200">200 pages</option>
+    <option value="500">500 pages</option>
+    <option value="1000">1000 pages</option>
+  </select>
+  <select class="tb-select" id="concurrency-sel">
+    <option value="3">3 threads</option>
+    <option value="5" selected>5 threads</option>
+    <option value="8">8 threads</option>
+    <option value="10">10 threads</option>
+  </select>
+  <button id="btn-start" onclick="toggleCrawl()">▶ Start Crawl</button>
+  <button id="btn-export" onclick="exportCSV()" style="display:none">⬇ Export CSV</button>
+  <input id="filter-input" placeholder="🔍 Filter URLs…" oninput="applyFilter()" style="display:none"/>
+  <select id="filter-status" class="tb-select" onchange="applyFilter()" style="display:none">
+    <option value="all">All URLs</option>
+    <option value="errors">Errors only</option>
+    <option value="warnings">Warnings only</option>
+    <option value="ok">No issues</option>
+    <option value="2xx">2xx OK</option>
+    <option value="3xx">3xx Redirects</option>
+    <option value="4xx">4xx Errors</option>
+  </select>
+</div>
 
-async function crawlMultipleUrls(baseUrl, maxPages = 5) {
-  // First crawl the base URL and get discovered URLs
-  const base = await crawlUrl(baseUrl);
-  const discovered = (base.discovered_urls || []).slice(0, maxPages - 1);
-  
-  const results = [base];
-  for (const url of discovered) {
-    try {
-      const r = await crawlUrl(url);
-      results.push(r);
-    } catch (e) {
-      results.push({
-        url,
-        status_code: 0,
-        title: "—",
-        meta_description: "—",
-        h1: "—",
-        word_count: 0,
-        issues: [{ type: "error", message: "Failed to crawl" }],
-        opportunities: []
-      });
-    }
-  }
-  return results;
-}
+<div id="progressbar">
+  <div id="prog-inner">
+    <div id="prog-track"><div id="prog-fill"></div></div>
+    <div id="prog-label">Ready</div>
+  </div>
+</div>
 
-// ── TABS ──────────────────────────────────────────────────────────────────────
+<div id="tabbar"></div>
+
+<div id="main">
+  <div id="content"></div>
+  <div id="detail-panel"><div id="detail-inner"></div></div>
+</div>
+
+<div id="statusbar">
+  <div class="sb-item">URLs: <span id="sb-urls">0</span></div>
+  <div class="sb-item">OK: <span id="sb-ok">0</span></div>
+  <div class="sb-item">Errors: <span id="sb-err">0</span></div>
+  <div class="sb-item">Warnings: <span id="sb-warn">0</span></div>
+  <div class="sb-item">No Title: <span id="sb-notitle">0</span></div>
+  <div class="sb-item">No H1: <span id="sb-noh1">0</span></div>
+  <div class="sb-item">Img Alt: <span id="sb-alt">0</span></div>
+  <div class="sb-item">Queue: <span id="sb-queue">0</span></div>
+  <div id="sb-right">SEO Spider Pro — Real Crawler — JS Site Support — Up to 1000 URLs</div>
+</div>
+
+<div id="modal-overlay">
+  <div id="modal">
+    <h2 id="modal-title">How to Use</h2>
+    <div id="modal-body"></div>
+    <button class="close-btn" onclick="closeModal()">Close</button>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+/* ═══════════════════════════════════
+   STATE
+═══════════════════════════════════ */
+let results = [];
+let filteredResults = [];
+let activeTab = 'overview';
+let selectedRow = null;
+let crawling = false;
+let stopFlag = false;
+let sortKey = null;
+let sortAsc = true;
+
+/* ═══════════════════════════════════
+   TABS
+═══════════════════════════════════ */
 const TABS = [
-  "Overview", "Internal Links", "Images", "Page Titles",
-  "Meta Desc", "H1", "Response Codes", "Canonicals",
-  "Directives", "Structured Data", "Issues", "Security"
+  {id:'overview',  label:'Overview'},
+  {id:'titles',    label:'Page Titles'},
+  {id:'meta',      label:'Meta Desc'},
+  {id:'h1',        label:'H1 / Headings'},
+  {id:'response',  label:'Response Codes'},
+  {id:'images',    label:'Images'},
+  {id:'links',     label:'Internal Links'},
+  {id:'canonical', label:'Canonicals'},
+  {id:'directives',label:'Directives'},
+  {id:'schema',    label:'Schema / OG'},
+  {id:'security',  label:'Security'},
+  {id:'issues',    label:'All Issues'},
 ];
 
-// ── MAIN COMPONENT ────────────────────────────────────────────────────────────
-export default function SEOSpider() {
-  const [url, setUrl] = useState("");
-  const [status, setStatus] = useState("idle"); // idle | crawling | done | error
-  const [progress, setProgress] = useState(0);
-  const [progressMsg, setProgressMsg] = useState("");
-  const [results, setResults] = useState([]);
-  const [activeTab, setActiveTab] = useState("Overview");
-  const [selectedRow, setSelectedRow] = useState(null);
-  const [maxPages, setMaxPages] = useState(5);
-  const abortRef = useRef(false);
+/* ═══════════════════════════════════
+   CORS PROXIES — 6 fallbacks
+═══════════════════════════════════ */
+const PROXIES = [
+  u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+  u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+  u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
+  u => `https://thingproxy.freeboard.io/fetch/${u}`,
+  u => `https://proxy.cors.sh/${u}`,
+  u => `https://cors-anywhere.herokuapp.com/${u}`,
+];
 
-  const startCrawl = useCallback(async () => {
-    if (!url.trim()) return;
-    let crawlUrl2 = url.trim();
-    if (!crawlUrl2.startsWith("http")) crawlUrl2 = "https://" + crawlUrl2;
-    
-    abortRef.current = false;
-    setStatus("crawling");
-    setResults([]);
-    setSelectedRow(null);
-    setProgress(5);
-    setProgressMsg("🔍 Connecting to URL…");
+// Track which proxy works best
+let bestProxy = 0;
 
+async function fetchPage(url, timeout = 15000) {
+  // Try best proxy first, then others
+  const order = [bestProxy, ...PROXIES.map((_,i)=>i).filter(i=>i!==bestProxy)];
+  for (const pi of order) {
     try {
-      const all = [];
-      setProgressMsg(`🕷️ Crawling ${crawlUrl2}…`);
-      setProgress(15);
-
-      const base = await crawlUrl(crawlUrl2);
-      all.push(base);
-      setResults([...all]);
-      setProgress(35);
-
-      const discovered = (base.discovered_urls || []).slice(0, maxPages - 1);
-      for (let i = 0; i < discovered.length; i++) {
-        if (abortRef.current) break;
-        setProgressMsg(`🕷️ Crawling page ${i + 2}/${maxPages}: ${discovered[i]}`);
-        setProgress(35 + Math.round(((i + 1) / discovered.length) * 55));
-        try {
-          const r = await crawlUrl(discovered[i]);
-          all.push(r);
-        } catch {
-          all.push({ url: discovered[i], status_code: 0, title: "Error", issues: [{ type: "error", message: "Failed" }], opportunities: [] });
+      const ctrl = new AbortController();
+      const tid = setTimeout(() => ctrl.abort(), timeout);
+      const t0 = Date.now();
+      const res = await fetch(PROXIES[pi](url), {
+        signal: ctrl.signal,
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+      });
+      clearTimeout(tid);
+      const ms = Date.now() - t0;
+      if (res.ok) {
+        const text = await res.text();
+        if (text && text.length > 100) {
+          bestProxy = pi; // remember what worked
+          return { ok: true, status: 200, text, ms };
         }
-        setResults([...all]);
+      }
+    } catch (e) { /* try next */ }
+  }
+  return { ok: false, status: 0, text: '', ms: timeout };
+}
+
+/* ═══════════════════════════════════
+   SITEMAP FETCHER — KEY FIX FOR JS SITES
+═══════════════════════════════════ */
+async function fetchSitemap(baseUrl) {
+  const urls = new Set();
+  const origin = getOrigin(baseUrl);
+  if (!origin) return urls;
+
+  // Common sitemap locations
+  const sitemapUrls = [
+    `${origin}/sitemap.xml`,
+    `${origin}/sitemap_index.xml`,
+    `${origin}/sitemap-index.xml`,
+    `${origin}/sitemaps.xml`,
+    `${origin}/sitemap/sitemap.xml`,
+    `${origin}/robots.txt`, // robots.txt may contain sitemap URL
+  ];
+
+  setProgress(0, 0, 100, '🗺️ Fetching sitemap.xml…');
+
+  for (const sUrl of sitemapUrls) {
+    try {
+      const { ok, text } = await fetchPage(sUrl, 10000);
+      if (!ok || !text) continue;
+
+      // Parse robots.txt for Sitemap: directives
+      if (sUrl.endsWith('robots.txt')) {
+        const sitemapMatches = text.match(/^Sitemap:\s*(.+)$/gim) || [];
+        for (const m of sitemapMatches) {
+          const sitemapRef = m.replace(/^Sitemap:\s*/i, '').trim();
+          const refUrls = await parseSitemapXml(sitemapRef, origin);
+          refUrls.forEach(u => urls.add(u));
+        }
+        continue;
       }
 
-      setProgress(100);
-      setProgressMsg("✅ Crawl complete!");
-      setStatus("done");
-    } catch (e) {
-      setStatus("error");
-      setProgressMsg("❌ Error: " + e.message);
-    }
-  }, [url, maxPages]);
+      // Parse XML sitemap
+      const parsed = await parseSitemapXml(sUrl, origin, text);
+      parsed.forEach(u => urls.add(u));
 
-  // ── Derived stats ──
-  const issueCount = results.reduce((a, r) => a + (r.issues?.filter(i => i.type === "error").length || 0), 0);
-  const warnCount = results.reduce((a, r) => a + (r.issues?.filter(i => i.type === "warning").length || 0), 0);
-  const okCount = results.filter(r => r.status_code >= 200 && r.status_code < 300).length;
-  const totalImages = results.reduce((a, r) => a + (r.image_count || 0), 0);
-  const missingAlt = results.reduce((a, r) => a + (r.images_missing_alt || 0), 0);
+      if (urls.size > 0) {
+        setProgress(0, urls.size, 100, `🗺️ Found ${urls.size} URLs in sitemap`);
+        break; // Got URLs, stop trying other sitemaps
+      }
+    } catch (e) { /* continue */ }
+  }
 
-  // ── Render helpers ──
-  const renderTable = (rows, columns) => (
-    <div style={{ overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.78rem" }}>
-        <thead>
-          <tr style={{ background: "#1a2030", borderBottom: "2px solid #2a3548" }}>
-            {columns.map(c => (
-              <th key={c.key} style={{ padding: "8px 12px", textAlign: "left", color: "#8892a4", fontWeight: 600, whiteSpace: "nowrap", fontFamily: "'DM Mono', monospace" }}>
-                {c.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => (
-            <tr key={i}
-              onClick={() => setSelectedRow(row)}
-              style={{
-                background: selectedRow === row ? "#1e2d40" : i % 2 === 0 ? "#111827" : "#0f1623",
-                borderBottom: "1px solid #1e2535",
-                cursor: "pointer",
-                transition: "background 0.15s"
-              }}
-              onMouseEnter={e => e.currentTarget.style.background = "#1a2535"}
-              onMouseLeave={e => e.currentTarget.style.background = selectedRow === row ? "#1e2d40" : i % 2 === 0 ? "#111827" : "#0f1623"}
-            >
-              {columns.map(c => (
-                <td key={c.key} style={{ padding: "7px 12px", color: "#c9d1d9", maxWidth: 280 }}>
-                  {c.render ? c.render(row) : truncate(String(row[c.key] ?? "—"), 55)}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {rows.length === 0 && (
-        <div style={{ textAlign: "center", padding: "40px", color: "#555" }}>No data yet</div>
-      )}
-    </div>
-  );
-
-  const tabContent = () => {
-    switch (activeTab) {
-      case "Overview":
-        return (
-          <div>
-            {/* Summary cards */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
-              {[
-                { label: "URLs Crawled", value: results.length, color: "#60a5fa" },
-                { label: "OK (2xx)", value: okCount, color: "#4ade80" },
-                { label: "Errors", value: issueCount, color: "#f87171" },
-                { label: "Warnings", value: warnCount, color: "#facc15" },
-              ].map(c => (
-                <div key={c.label} style={{ background: "#111827", borderRadius: 10, padding: "18px 20px", border: "1px solid #1e2535" }}>
-                  <div style={{ fontSize: "1.8rem", fontWeight: 800, color: c.color, fontFamily: "'DM Mono', monospace" }}>{c.value}</div>
-                  <div style={{ fontSize: ".76rem", color: "#8892a4", marginTop: 4 }}>{c.label}</div>
-                </div>
-              ))}
-            </div>
-            {renderTable(results, [
-              { key: "url", label: "URL", render: r => <a href={r.url} target="_blank" rel="noopener noreferrer" style={{ color: "#60a5fa", textDecoration: "none", fontSize: "0.77rem" }} onClick={e => e.stopPropagation()}>{truncate(r.url, 50)}</a> },
-              { key: "status_code", label: "Status", render: r => <span style={{ color: statusColor(r.status_code), fontWeight: 700, fontFamily: "monospace" }}>{r.status_code || "—"}</span> },
-              { key: "title", label: "Title", render: r => truncate(r.title, 50) },
-              { key: "title_length", label: "Title Len", render: r => pill(r.title_length, 60, 70) },
-              { key: "word_count", label: "Words", render: r => <span style={{ color: "#8892a4" }}>{r.word_count || "—"}</span> },
-              { key: "issues", label: "Issues", render: r => {
-                const e = r.issues?.filter(i => i.type === "error").length || 0;
-                const w = r.issues?.filter(i => i.type === "warning").length || 0;
-                return <span>{e > 0 && <span style={{ color: "#f87171", marginRight: 6 }}>⛔ {e}</span>}{w > 0 && <span style={{ color: "#facc15" }}>⚠️ {w}</span>}{e === 0 && w === 0 && <span style={{ color: "#4ade80" }}>✔ OK</span>}</span>;
-              }},
-            ])}
-          </div>
-        );
-
-      case "Page Titles":
-        return renderTable(results, [
-          { key: "url", label: "URL", render: r => <span style={{ color: "#60a5fa", fontSize: ".76rem" }}>{truncate(r.url, 45)}</span> },
-          { key: "title", label: "Title", render: r => <span style={{ color: r.title && r.title !== "—" ? "#c9d1d9" : "#f87171" }}>{truncate(r.title, 55)}</span> },
-          { key: "title_length", label: "Length", render: r => pill(r.title_length, 60, 70) },
-          { key: "title_issue", label: "Issue", render: r => {
-            if (!r.title || r.title === "—") return <span style={{ color: "#f87171" }}>Missing</span>;
-            if (r.title_length > 70) return <span style={{ color: "#f87171" }}>Too Long</span>;
-            if (r.title_length < 30) return <span style={{ color: "#facc15" }}>Too Short</span>;
-            return <span style={{ color: "#4ade80" }}>OK</span>;
-          }}
-        ]);
-
-      case "Meta Desc":
-        return renderTable(results, [
-          { key: "url", label: "URL", render: r => <span style={{ color: "#60a5fa", fontSize: ".76rem" }}>{truncate(r.url, 40)}</span> },
-          { key: "meta_description", label: "Meta Description", render: r => <span style={{ color: "#c9d1d9" }}>{truncate(r.meta_description, 70)}</span> },
-          { key: "meta_description_length", label: "Length", render: r => pill(r.meta_description_length, 155, 165) },
-          { key: "meta_issue", label: "Issue", render: r => {
-            if (!r.meta_description || r.meta_description === "—") return <span style={{ color: "#f87171" }}>Missing</span>;
-            if (r.meta_description_length > 165) return <span style={{ color: "#f87171" }}>Too Long</span>;
-            if (r.meta_description_length < 70) return <span style={{ color: "#facc15" }}>Too Short</span>;
-            return <span style={{ color: "#4ade80" }}>OK</span>;
-          }}
-        ]);
-
-      case "H1":
-        return renderTable(results, [
-          { key: "url", label: "URL", render: r => <span style={{ color: "#60a5fa", fontSize: ".76rem" }}>{truncate(r.url, 40)}</span> },
-          { key: "h1", label: "H1", render: r => <span style={{ color: "#c9d1d9" }}>{truncate(r.h1, 60)}</span> },
-          { key: "h2_count", label: "H2 Count", render: r => <span style={{ color: "#8892a4" }}>{r.h2_count ?? "—"}</span> },
-          { key: "h1_issue", label: "Issue", render: r => {
-            if (!r.h1 || r.h1 === "—") return <span style={{ color: "#f87171" }}>Missing H1</span>;
-            if (r.headings_structure?.multiple_h1) return <span style={{ color: "#facc15" }}>Multiple H1</span>;
-            return <span style={{ color: "#4ade80" }}>OK</span>;
-          }}
-        ]);
-
-      case "Response Codes":
-        return renderTable(results, [
-          { key: "url", label: "URL", render: r => <span style={{ color: "#60a5fa", fontSize: ".76rem" }}>{truncate(r.url, 45)}</span> },
-          { key: "status_code", label: "Status Code", render: r => <span style={{ color: statusColor(r.status_code), fontWeight: 700, fontFamily: "monospace", fontSize: "1rem" }}>{r.status_code || "—"}</span> },
-          { key: "content_type", label: "Content Type", render: r => <span style={{ color: "#8892a4" }}>{r.content_type || "—"}</span> },
-          { key: "is_https", label: "HTTPS", render: r => r.is_https ? <span style={{ color: "#4ade80" }}>✔ Secure</span> : <span style={{ color: "#f87171" }}>✘ HTTP</span> },
-          { key: "page_size_kb", label: "Size (KB)", render: r => <span style={{ color: r.page_size_kb > 500 ? "#facc15" : "#8892a4" }}>{r.page_size_kb ? r.page_size_kb + " KB" : "—"}</span> }
-        ]);
-
-      case "Images":
-        return (
-          <div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16, marginBottom: 20 }}>
-              {[
-                { label: "Total Images", value: totalImages, color: "#60a5fa" },
-                { label: "Missing Alt Text", value: missingAlt, color: "#f87171" },
-                { label: "Pages with Images", value: results.filter(r => r.image_count > 0).length, color: "#4ade80" },
-              ].map(c => (
-                <div key={c.label} style={{ background: "#111827", borderRadius: 10, padding: "16px 18px", border: "1px solid #1e2535" }}>
-                  <div style={{ fontSize: "1.6rem", fontWeight: 800, color: c.color, fontFamily: "monospace" }}>{c.value}</div>
-                  <div style={{ fontSize: ".74rem", color: "#8892a4", marginTop: 3 }}>{c.label}</div>
-                </div>
-              ))}
-            </div>
-            {renderTable(results, [
-              { key: "url", label: "Page URL", render: r => <span style={{ color: "#60a5fa", fontSize: ".76rem" }}>{truncate(r.url, 40)}</span> },
-              { key: "image_count", label: "Images", render: r => <span style={{ color: "#c9d1d9" }}>{r.image_count ?? "—"}</span> },
-              { key: "images_missing_alt", label: "Missing Alt", render: r => <span style={{ color: r.images_missing_alt > 0 ? "#f87171" : "#4ade80" }}>{r.images_missing_alt ?? "—"}</span> },
-              { key: "img_issue", label: "Issue", render: r => r.images_missing_alt > 0 ? <span style={{ color: "#facc15" }}>Alt Text Missing</span> : <span style={{ color: "#4ade80" }}>OK</span> }
-            ])}
-          </div>
-        );
-
-      case "Internal Links":
-        return renderTable(results, [
-          { key: "url", label: "URL", render: r => <span style={{ color: "#60a5fa", fontSize: ".76rem" }}>{truncate(r.url, 40)}</span> },
-          { key: "internal_links", label: "Internal Links", render: r => <span style={{ color: "#c9d1d9" }}>{r.internal_links ?? "—"}</span> },
-          { key: "external_links", label: "External Links", render: r => <span style={{ color: "#8892a4" }}>{r.external_links ?? "—"}</span> },
-          { key: "broken_links", label: "Broken Links", render: r => <span style={{ color: r.broken_links?.length > 0 ? "#f87171" : "#4ade80" }}>{r.broken_links?.length ?? "—"}</span> }
-        ]);
-
-      case "Canonicals":
-        return renderTable(results, [
-          { key: "url", label: "URL", render: r => <span style={{ color: "#60a5fa", fontSize: ".76rem" }}>{truncate(r.url, 40)}</span> },
-          { key: "canonical", label: "Canonical URL", render: r => <span style={{ color: "#c9d1d9", fontSize: ".76rem" }}>{truncate(r.canonical, 50)}</span> },
-          { key: "has_canonical", label: "Has Canonical", render: r => r.has_canonical ? <span style={{ color: "#4ade80" }}>✔ Yes</span> : <span style={{ color: "#facc15" }}>✘ No</span> },
-          { key: "canonical_issue", label: "Issue", render: r => {
-            if (!r.has_canonical) return <span style={{ color: "#facc15" }}>Missing Canonical</span>;
-            if (r.canonical && r.canonical !== r.url) return <span style={{ color: "#facc15" }}>Points Elsewhere</span>;
-            return <span style={{ color: "#4ade80" }}>OK</span>;
-          }}
-        ]);
-
-      case "Directives":
-        return renderTable(results, [
-          { key: "url", label: "URL", render: r => <span style={{ color: "#60a5fa", fontSize: ".76rem" }}>{truncate(r.url, 40)}</span> },
-          { key: "robots_meta", label: "Meta Robots", render: r => <span style={{ color: "#c9d1d9", fontFamily: "monospace", fontSize: ".75rem" }}>{r.robots_meta || "—"}</span> },
-          { key: "noindex", label: "NoIndex", render: r => r.noindex ? <span style={{ color: "#f87171" }}>✘ NoIndex</span> : <span style={{ color: "#4ade80" }}>✔ Indexed</span> },
-          { key: "nofollow", label: "NoFollow", render: r => r.nofollow ? <span style={{ color: "#facc15" }}>NoFollow</span> : <span style={{ color: "#4ade80" }}>Follow</span> },
-          { key: "lang", label: "Lang", render: r => <span style={{ color: "#8892a4" }}>{r.lang || "—"}</span> }
-        ]);
-
-      case "Structured Data":
-        return renderTable(results, [
-          { key: "url", label: "URL", render: r => <span style={{ color: "#60a5fa", fontSize: ".76rem" }}>{truncate(r.url, 40)}</span> },
-          { key: "has_schema", label: "Has Schema", render: r => r.has_schema ? <span style={{ color: "#4ade80" }}>✔ Yes</span> : <span style={{ color: "#facc15" }}>✘ No</span> },
-          { key: "schema_types", label: "Schema Types", render: r => <span style={{ color: "#c9d1d9", fontSize: ".75rem" }}>{r.schema_types?.join(", ") || "—"}</span> },
-          { key: "structured_data_valid", label: "Valid", render: r => r.structured_data_valid ? <span style={{ color: "#4ade80" }}>✔ Valid</span> : <span style={{ color: "#f87171" }}>✘ Errors</span> },
-          { key: "open_graph", label: "Open Graph", render: r => r.open_graph ? <span style={{ color: "#4ade80" }}>✔</span> : <span style={{ color: "#facc15" }}>✘</span> }
-        ]);
-
-      case "Security":
-        return renderTable(results, [
-          { key: "url", label: "URL", render: r => <span style={{ color: "#60a5fa", fontSize: ".76rem" }}>{truncate(r.url, 40)}</span> },
-          { key: "is_https", label: "HTTPS", render: r => r.is_https ? <span style={{ color: "#4ade80" }}>✔ Secure</span> : <span style={{ color: "#f87171" }}>✘ Insecure</span> },
-          { key: "hsts", label: "HSTS", render: r => r.security?.hsts ? <span style={{ color: "#4ade80" }}>✔</span> : <span style={{ color: "#facc15" }}>✘</span> },
-          { key: "mixed_content", label: "Mixed Content", render: r => r.security?.mixed_content ? <span style={{ color: "#f87171" }}>✘ Found</span> : <span style={{ color: "#4ade80" }}>✔ Clean</span> },
-          { key: "viewport_meta", label: "Viewport Meta", render: r => r.viewport_meta ? <span style={{ color: "#4ade80" }}>✔</span> : <span style={{ color: "#facc15" }}>✘</span> }
-        ]);
-
-      case "Issues":
-        const allIssues = results.flatMap(r =>
-          [...(r.issues || []), ...(r.opportunities || [])].map(i => ({ ...i, url: r.url }))
-        );
-        return (
-          <div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16, marginBottom: 20 }}>
-              {[
-                { label: "Errors", value: allIssues.filter(i => i.type === "error").length, color: "#f87171", icon: "⛔" },
-                { label: "Warnings", value: allIssues.filter(i => i.type === "warning").length, color: "#facc15", icon: "⚠️" },
-                { label: "Opportunities", value: allIssues.filter(i => i.type === "info").length, color: "#60a5fa", icon: "💡" },
-              ].map(c => (
-                <div key={c.label} style={{ background: "#111827", borderRadius: 10, padding: "16px 18px", border: "1px solid #1e2535" }}>
-                  <div style={{ fontSize: "1.6rem", fontWeight: 800, color: c.color, fontFamily: "monospace" }}>{c.icon} {c.value}</div>
-                  <div style={{ fontSize: ".74rem", color: "#8892a4", marginTop: 3 }}>{c.label}</div>
-                </div>
-              ))}
-            </div>
-            <div>
-              {allIssues.map((issue, i) => (
-                <div key={i} style={{
-                  display: "flex", alignItems: "flex-start", gap: 12,
-                  padding: "10px 14px", borderBottom: "1px solid #1e2535",
-                  background: i % 2 === 0 ? "#111827" : "#0f1623"
-                }}>
-                  <span style={{ fontSize: "1rem", minWidth: 20 }}>
-                    {issue.type === "error" ? "⛔" : issue.type === "warning" ? "⚠️" : "💡"}
-                  </span>
-                  <div>
-                    <div style={{ fontSize: ".8rem", color: "#c9d1d9" }}>{issue.message}</div>
-                    <div style={{ fontSize: ".72rem", color: "#60a5fa", marginTop: 2 }}>{truncate(issue.url, 55)}</div>
-                  </div>
-                  <span style={{
-                    marginLeft: "auto", fontSize: ".7rem", fontWeight: 700,
-                    padding: "2px 8px", borderRadius: 20,
-                    background: issue.type === "error" ? "rgba(248,113,113,.15)" : issue.type === "warning" ? "rgba(250,204,21,.15)" : "rgba(96,165,250,.15)",
-                    color: issue.type === "error" ? "#f87171" : issue.type === "warning" ? "#facc15" : "#60a5fa"
-                  }}>{issue.type.toUpperCase()}</span>
-                </div>
-              ))}
-              {allIssues.length === 0 && <div style={{ textAlign: "center", padding: 40, color: "#555" }}>No issues found</div>}
-            </div>
-          </div>
-        );
-
-      default:
-        return <div style={{ padding: 40, color: "#555", textAlign: "center" }}>No data for this tab yet</div>;
-    }
-  };
-
-  return (
-    <div style={{
-      minHeight: "100vh",
-      background: "#0a0f1a",
-      fontFamily: "'DM Sans', sans-serif",
-      color: "#c9d1d9"
-    }}>
-      {/* Header */}
-      <div style={{
-        background: "linear-gradient(135deg, #0f1a2e 0%, #0a1428 100%)",
-        borderBottom: "1px solid #1e2535",
-        padding: "0 24px",
-        display: "flex", alignItems: "center", gap: 14, height: 56
-      }}>
-        <span style={{ fontSize: "1.4rem" }}>🐸</span>
-        <span style={{ fontFamily: "Georgia, serif", fontWeight: 700, color: "#fff", fontSize: "1rem", letterSpacing: ".02em" }}>
-          SEO Spider
-        </span>
-        <span style={{ fontSize: ".7rem", color: "#4ade80", background: "rgba(74,222,128,.1)", border: "1px solid rgba(74,222,128,.2)", padding: "2px 8px", borderRadius: 12, marginLeft: 4 }}>
-          AI-Powered
-        </span>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-          {["File","Mode","Config","Bulk Export","Reports","Help"].map(m => (
-            <span key={m} style={{ fontSize: ".78rem", color: "#8892a4", padding: "4px 10px", cursor: "default", borderRadius: 4 }}
-              onMouseEnter={e => e.target.style.background="#1e2535"}
-              onMouseLeave={e => e.target.style.background="transparent"}
-            >{m}</span>
-          ))}
-        </div>
-      </div>
-
-      {/* Toolbar */}
-      <div style={{
-        background: "#0d1525",
-        borderBottom: "1px solid #1e2535",
-        padding: "10px 24px",
-        display: "flex", alignItems: "center", gap: 10
-      }}>
-        <span style={{ fontSize: ".78rem", color: "#8892a4", whiteSpace: "nowrap" }}>Enter URL:</span>
-        <input
-          value={url}
-          onChange={e => setUrl(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && startCrawl()}
-          placeholder="https://example.com"
-          style={{
-            flex: 1, maxWidth: 420,
-            background: "#111827", border: "1px solid #2a3548",
-            color: "#e6edf3", borderRadius: 6, padding: "7px 12px",
-            fontSize: ".85rem", outline: "none",
-            fontFamily: "'DM Mono', monospace"
-          }}
-        />
-        <select
-          value={maxPages}
-          onChange={e => setMaxPages(Number(e.target.value))}
-          style={{ background: "#111827", border: "1px solid #2a3548", color: "#c9d1d9", borderRadius: 6, padding: "7px 10px", fontSize: ".8rem" }}
-        >
-          <option value={1}>1 Page</option>
-          <option value={3}>3 Pages</option>
-          <option value={5}>5 Pages</option>
-          <option value={8}>8 Pages</option>
-        </select>
-        <button
-          onClick={startCrawl}
-          disabled={status === "crawling"}
-          style={{
-            background: status === "crawling" ? "#1e4620" : "linear-gradient(135deg,#22c55e,#16a34a)",
-            color: "#fff", border: "none", borderRadius: 6,
-            padding: "8px 22px", cursor: status === "crawling" ? "not-allowed" : "pointer",
-            fontWeight: 700, fontSize: ".82rem",
-            display: "flex", alignItems: "center", gap: 7
-          }}
-        >
-          {status === "crawling"
-            ? <><span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>🕷️</span> Crawling…</>
-            : "▶ Start"}
-        </button>
-        {status === "crawling" && (
-          <button onClick={() => { abortRef.current = true; setStatus("done"); }}
-            style={{ background: "#1e2535", border: "1px solid #2a3548", color: "#f87171", borderRadius: 6, padding: "8px 14px", cursor: "pointer", fontSize: ".8rem" }}>
-            ■ Stop
-          </button>
-        )}
-        {results.length > 0 && (
-          <button
-            onClick={() => {
-              const csv = ["URL,Status,Title,Title Len,Meta Desc,Meta Len,H1,Words,Issues"].concat(
-                results.map(r => `"${r.url}","${r.status_code}","${(r.title||"").replace(/"/g,'""')}","${r.title_length||""}","${(r.meta_description||"").replace(/"/g,'""')}","${r.meta_description_length||""}","${(r.h1||"").replace(/"/g,'""')}","${r.word_count||""}","${r.issues?.length||0}"`)
-              ).join("\n");
-              const blob = new Blob([csv], { type: "text/csv" });
-              const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
-              a.download = "seo-spider-export.csv"; a.click();
-            }}
-            style={{ background: "#1e2535", border: "1px solid #2a3548", color: "#8892a4", borderRadius: 6, padding: "8px 14px", cursor: "pointer", fontSize: ".8rem" }}>
-            ⬇ Export CSV
-          </button>
-        )}
-      </div>
-
-      {/* Progress bar */}
-      {(status === "crawling" || (status === "done" && progress === 100)) && (
-        <div style={{ background: "#0d1525", borderBottom: "1px solid #1e2535", padding: "6px 24px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ flex: 1, background: "#1e2535", borderRadius: 4, height: 6, overflow: "hidden" }}>
-              <div style={{ width: `${progress}%`, height: "100%", background: "linear-gradient(90deg,#22c55e,#4ade80)", borderRadius: 4, transition: "width .5s ease" }} />
-            </div>
-            <span style={{ fontSize: ".72rem", color: "#8892a4", minWidth: 200 }}>{progressMsg}</span>
-          </div>
-        </div>
-      )}
-
-      {/* Tabs */}
-      <div style={{
-        background: "#0d1525",
-        borderBottom: "1px solid #1e2535",
-        display: "flex", overflowX: "auto",
-        padding: "0 24px"
-      }}>
-        {TABS.map(t => (
-          <button key={t}
-            onClick={() => setActiveTab(t)}
-            style={{
-              background: "none", border: "none",
-              borderBottom: activeTab === t ? "2px solid #22c55e" : "2px solid transparent",
-              color: activeTab === t ? "#22c55e" : "#8892a4",
-              padding: "10px 14px", cursor: "pointer",
-              fontSize: ".76rem", fontWeight: activeTab === t ? 700 : 400,
-              whiteSpace: "nowrap", transition: "color .15s",
-              fontFamily: "'DM Sans', sans-serif"
-            }}
-          >{t}</button>
-        ))}
-      </div>
-
-      {/* Main area */}
-      <div style={{ display: "flex", height: "calc(100vh - 210px)", overflow: "hidden" }}>
-        {/* Table pane */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "16px 24px" }}>
-          {status === "idle" && (
-            <div style={{ textAlign: "center", paddingTop: 80, color: "#2a3548" }}>
-              <div style={{ fontSize: "4rem", marginBottom: 16 }}>🐸</div>
-              <div style={{ fontSize: "1.2rem", color: "#3a4a5c", fontWeight: 600 }}>Enter a URL above to start crawling</div>
-              <div style={{ fontSize: ".85rem", color: "#2a3548", marginTop: 8 }}>AI-powered SEO analysis covering 300+ checks</div>
-            </div>
-          )}
-          {(status === "crawling" || status === "done" || status === "error") && tabContent()}
-        </div>
-
-        {/* Detail panel */}
-        {selectedRow && (
-          <div style={{
-            width: 320, borderLeft: "1px solid #1e2535",
-            background: "#0d1525", overflowY: "auto",
-            padding: "16px"
-          }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 14 }}>
-              <span style={{ fontWeight: 700, color: "#e6edf3", fontSize: ".85rem" }}>Page Details</span>
-              <button onClick={() => setSelectedRow(null)} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: "1.1rem" }}>×</button>
-            </div>
-
-            <a href={selectedRow.url} target="_blank" rel="noopener noreferrer"
-              style={{ color: "#60a5fa", fontSize: ".75rem", wordBreak: "break-all", display: "block", marginBottom: 14 }}>
-              {selectedRow.url}
-            </a>
-
-            {[
-              ["Status", <span style={{ color: statusColor(selectedRow.status_code), fontWeight: 700 }}>{selectedRow.status_code}</span>],
-              ["Title", selectedRow.title],
-              ["Title Length", selectedRow.title_length],
-              ["Meta Description", truncate(selectedRow.meta_description, 80)],
-              ["Meta Desc Length", selectedRow.meta_description_length],
-              ["H1", selectedRow.h1],
-              ["Word Count", selectedRow.word_count],
-              ["Images", selectedRow.image_count],
-              ["Missing Alt", selectedRow.images_missing_alt],
-              ["Internal Links", selectedRow.internal_links],
-              ["External Links", selectedRow.external_links],
-              ["Page Size", selectedRow.page_size_kb ? selectedRow.page_size_kb + " KB" : "—"],
-              ["HTTPS", selectedRow.is_https ? "✔ Yes" : "✘ No"],
-              ["Canonical", truncate(selectedRow.canonical, 35)],
-              ["Robots Meta", selectedRow.robots_meta],
-              ["Schema Types", selectedRow.schema_types?.join(", ")],
-              ["Readability", selectedRow.readability_score],
-              ["Language", selectedRow.lang],
-            ].map(([k, v]) => v ? (
-              <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #1a2030", gap: 8 }}>
-                <span style={{ fontSize: ".73rem", color: "#6b7280" }}>{k}</span>
-                <span style={{ fontSize: ".73rem", color: "#c9d1d9", textAlign: "right", fontFamily: typeof v === "number" ? "monospace" : "inherit" }}>{v}</span>
-              </div>
-            ) : null)}
-
-            {selectedRow.issues?.length > 0 && (
-              <div style={{ marginTop: 14 }}>
-                <div style={{ fontSize: ".75rem", fontWeight: 700, color: "#8892a4", marginBottom: 8 }}>ISSUES</div>
-                {[...(selectedRow.issues||[]), ...(selectedRow.opportunities||[])].map((issue, i) => (
-                  <div key={i} style={{ fontSize: ".72rem", padding: "6px 8px", borderRadius: 5, marginBottom: 5,
-                    background: issue.type === "error" ? "rgba(248,113,113,.08)" : issue.type === "warning" ? "rgba(250,204,21,.08)" : "rgba(96,165,250,.08)",
-                    color: issue.type === "error" ? "#f87171" : issue.type === "warning" ? "#facc15" : "#60a5fa",
-                    borderLeft: `3px solid ${issue.type === "error" ? "#f87171" : issue.type === "warning" ? "#facc15" : "#60a5fa"}`
-                  }}>
-                    {issue.message}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {selectedRow.performance && (
-              <div style={{ marginTop: 14 }}>
-                <div style={{ fontSize: ".75rem", fontWeight: 700, color: "#8892a4", marginBottom: 8 }}>PERFORMANCE</div>
-                {[
-                  ["LCP", selectedRow.performance.estimated_lcp_ms + " ms"],
-                  ["FID", selectedRow.performance.estimated_fid_ms + " ms"],
-                  ["CLS", selectedRow.performance.cls_score],
-                  ["Render Blocking", selectedRow.performance.render_blocking_resources + " resources"],
-                ].map(([k, v]) => (
-                  <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: "1px solid #1a2030" }}>
-                    <span style={{ fontSize: ".72rem", color: "#6b7280" }}>{k}</span>
-                    <span style={{ fontSize: ".72rem", color: "#c9d1d9", fontFamily: "monospace" }}>{v}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: #0a0f1a; }
-        ::-webkit-scrollbar-thumb { background: #2a3548; border-radius: 3px; }
-        input:focus { border-color: #22c55e !important; box-shadow: 0 0 0 2px rgba(34,197,94,.15); }
-      `}</style>
-    </div>
-  );
+  return urls;
 }
+
+async function parseSitemapXml(sUrl, origin, existingText = null) {
+  const urls = new Set();
+  try {
+    const text = existingText || (await fetchPage(sUrl, 10000)).text;
+    if (!text) return urls;
+
+    const parser = new DOMParser();
+    const xml = parser.parseFromString(text, 'text/xml');
+
+    // Sitemap index — recurse into sub-sitemaps
+    const sitemapLocs = [...xml.querySelectorAll('sitemap > loc')];
+    if (sitemapLocs.length > 0) {
+      for (const loc of sitemapLocs.slice(0, 10)) { // max 10 sub-sitemaps
+        const subUrls = await parseSitemapXml(loc.textContent.trim(), origin);
+        subUrls.forEach(u => urls.add(u));
+        if (urls.size > 5000) break;
+      }
+      return urls;
+    }
+
+    // Regular sitemap
+    xml.querySelectorAll('url > loc').forEach(loc => {
+      const u = loc.textContent.trim();
+      if (u && u.startsWith(origin)) urls.add(u);
+    });
+
+    // Fallback: regex extract if XML parse fails
+    if (urls.size === 0) {
+      const matches = text.match(/<loc>\s*(https?:\/\/[^<\s]+)\s*<\/loc>/gi) || [];
+      matches.forEach(m => {
+        const u = m.replace(/<\/?loc>/gi, '').trim();
+        if (u.startsWith(origin)) urls.add(u);
+      });
+    }
+  } catch (e) { /* ignore */ }
+  return urls;
+}
+
+/* ═══════════════════════════════════
+   HTML PARSER → SEO DATA
+═══════════════════════════════════ */
+const skipExt = /\.(jpg|jpeg|png|gif|svg|webp|pdf|zip|mp4|mp3|css|js|ico|woff|woff2|ttf|eot|xml|txt|doc|docx|xls|xlsx|json)(\?.*)?$/i;
+
+function getOrigin(url) {
+  try { return new URL(url).origin; } catch { return ''; }
+}
+
+function normalizeUrl(href, base, origin) {
+  if (!href || href.startsWith('#') || href.startsWith('mailto:') ||
+      href.startsWith('tel:') || href.startsWith('javascript:') ||
+      href.startsWith('data:')) return null;
+  try {
+    const u = new URL(href, base);
+    u.hash = '';
+    if (!u.href.startsWith(origin)) return null;
+    if (skipExt.test(u.pathname)) return null;
+    return u.href;
+  } catch { return null; }
+}
+
+function extractLinksFromJS(html, origin) {
+  // Extract URLs hidden in JavaScript / JSON (for Next.js, React, etc.)
+  const found = new Set();
+  // Match href patterns in JS
+  const patterns = [
+    /["']href["']\s*:\s*["']([^"']+)["']/g,
+    /href=["']([^"'#\s][^"']*?)["']/g,
+    /["'](\/[a-zA-Z0-9\-_/]+(?:\?[^"'\s]*)?)["']/g, // relative paths
+    new RegExp(`["'](${origin.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}/[^"'\\s]+)["']`, 'g'),
+  ];
+  for (const pat of patterns) {
+    let m;
+    const re = new RegExp(pat.source, pat.flags);
+    while ((m = re.exec(html)) !== null) {
+      const raw = m[1];
+      const norm = normalizeUrl(raw, origin, origin);
+      if (norm) found.add(norm);
+      if (found.size > 500) break;
+    }
+  }
+  return found;
+}
+
+function parsePage(url, html, status, ms) {
+  const dp = new DOMParser();
+  const doc = dp.parseFromString(html, 'text/html');
+  const g = s => doc.querySelector(s);
+  const ga = s => [...doc.querySelectorAll(s)];
+  const origin = getOrigin(url);
+
+  const title = (g('title')?.textContent || '').trim();
+  const metaDesc = (g('meta[name="description"]')?.getAttribute('content') || '').trim();
+  const canonical = (g('link[rel="canonical"]')?.getAttribute('href') || '').trim();
+  const robotsMeta = (g('meta[name="robots"]')?.getAttribute('content') || '').trim();
+  const lang = doc.documentElement?.getAttribute('lang') || '';
+  const charset = g('meta[charset]')?.getAttribute('charset') || '';
+  const viewport = !!g('meta[name="viewport"]');
+  const ogTitle = (g('meta[property="og:title"]')?.getAttribute('content') || '').trim();
+  const ogImage = (g('meta[property="og:image"]')?.getAttribute('content') || '').trim();
+  const twitterCard = (g('meta[name="twitter:card"]')?.getAttribute('content') || '').trim();
+
+  const h1s = ga('h1').map(e => e.textContent.trim()).filter(Boolean);
+  const h2c = ga('h2').length;
+  const h3c = ga('h3').length;
+
+  const imgs = ga('img');
+  const missingAlt = imgs.filter(i => !(i.getAttribute('alt') || '').trim()).length;
+  const largeImgs = imgs.filter(i => parseInt(i.getAttribute('width') || '0') > 2000).length;
+
+  const bodyTxt = (doc.body?.textContent || '').replace(/\s+/g, ' ').trim();
+  const wordCount = bodyTxt.split(/\s+/).filter(Boolean).length;
+  const noindex = /noindex/i.test(robotsMeta);
+  const nofollow = /nofollow/i.test(robotsMeta);
+  const pageSizeKb = Math.round(html.length / 1024);
+
+  // ── Link extraction (HTML + JS) ──
+  const discovered = new Set();
+  let intLinks = 0, extLinks = 0;
+
+  // 1. Standard anchor tags
+  ga('a[href]').forEach(a => {
+    const raw = a.getAttribute('href') || '';
+    const norm = normalizeUrl(raw, url, origin);
+    if (norm) { intLinks++; discovered.add(norm); }
+    else if (raw.startsWith('http')) extLinks++;
+  });
+
+  // 2. Extract from JS/JSON in page (handles Next.js, React router, etc.)
+  const jsUrls = extractLinksFromJS(html, origin);
+  jsUrls.forEach(u => { discovered.add(u); });
+
+  // 3. Next.js __NEXT_DATA__ specific
+  try {
+    const nextData = g('script#__NEXT_DATA__')?.textContent;
+    if (nextData) {
+      const nd = JSON.parse(nextData);
+      extractUrlsFromObj(nd, origin, discovered);
+    }
+  } catch {}
+
+  // 4. Meta refresh / redirect
+  const refresh = g('meta[http-equiv="refresh"]')?.getAttribute('content') || '';
+  const rMatch = refresh.match(/url=(.+)/i);
+  if (rMatch) {
+    const norm = normalizeUrl(rMatch[1], url, origin);
+    if (norm) discovered.add(norm);
+  }
+
+  // Schema
+  const schemaScripts = ga('script[type="application/ld+json"]');
+  const schemaTypes = schemaScripts.flatMap(s => {
+    try { const d = JSON.parse(s.textContent); return [d['@type']].flat().filter(Boolean); } catch { return []; }
+  });
+  const hreflangCount = ga('link[rel="alternate"][hreflang]').length;
+
+  // ── Issues ──
+  const issues = [];
+  const tl = title.length, dl = metaDesc.length;
+  if (!title)         issues.push({ t: 'error',   cat: 'Title',       msg: 'Missing page title' });
+  else if (tl > 70)   issues.push({ t: 'warning',  cat: 'Title',       msg: `Title too long (${tl} chars, max 70)` });
+  else if (tl < 30)   issues.push({ t: 'warning',  cat: 'Title',       msg: `Title too short (${tl} chars)` });
+  if (!metaDesc)      issues.push({ t: 'warning',  cat: 'Meta',        msg: 'Missing meta description' });
+  else if (dl > 165)  issues.push({ t: 'warning',  cat: 'Meta',        msg: `Meta desc too long (${dl} chars)` });
+  else if (dl < 70)   issues.push({ t: 'warning',  cat: 'Meta',        msg: `Meta desc too short (${dl} chars)` });
+  if (!h1s.length)    issues.push({ t: 'error',    cat: 'H1',          msg: 'Missing H1 heading' });
+  if (h1s.length > 1) issues.push({ t: 'warning',  cat: 'H1',          msg: `Multiple H1 tags (${h1s.length})` });
+  if (!canonical)     issues.push({ t: 'warning',  cat: 'Canonical',   msg: 'No canonical tag found' });
+  if (missingAlt > 0) issues.push({ t: 'warning',  cat: 'Images',      msg: `${missingAlt} image(s) missing alt text` });
+  if (noindex)        issues.push({ t: 'error',    cat: 'Directives',  msg: 'Page is noindex — excluded from search' });
+  if (!url.startsWith('https://')) issues.push({ t: 'warning', cat: 'Security', msg: 'Not served over HTTPS' });
+  if (wordCount < 100) issues.push({ t: 'warning', cat: 'Content',     msg: `Low word count (${wordCount} words)` });
+  if (!ogTitle && !ogImage) issues.push({ t: 'info', cat: 'Social',   msg: 'No Open Graph tags found' });
+  if (!schemaTypes.length)  issues.push({ t: 'info', cat: 'Schema',   msg: 'No structured data (JSON-LD)' });
+  if (status >= 400)  issues.push({ t: 'error',    cat: 'Status',      msg: `HTTP ${status} error` });
+  if (h2c === 0 && wordCount > 300) issues.push({ t: 'info', cat: 'Structure', msg: 'No H2 subheadings found' });
+  if (pageSizeKb > 500) issues.push({ t: 'warning', cat: 'Performance', msg: `Large page size (${pageSizeKb} KB)` });
+  if (largeImgs > 0)  issues.push({ t: 'warning',  cat: 'Images',      msg: `${largeImgs} oversized image(s)` });
+
+  return {
+    url, status_code: status, ms,
+    title, tl,
+    metaDesc, dl,
+    h1: h1s[0] || '', h1c: h1s.length, h2c, h3c,
+    wordCount,
+    canonical, hasCanonical: !!canonical,
+    robotsMeta: robotsMeta || 'index, follow',
+    noindex, nofollow, lang, charset, viewport,
+    imgCount: imgs.length, missingAlt, largeImgs,
+    intLinks, extLinks,
+    isHttps: url.startsWith('https://'),
+    hasSchema: schemaTypes.length > 0, schemaTypes,
+    hasOG: !!(ogTitle || ogImage), ogTitle, ogImage, twitterCard,
+    hreflangCount, pageSizeKb,
+    issues,
+    _discovered: [...discovered],
+  };
+}
+
+function extractUrlsFromObj(obj, origin, found, depth = 0) {
+  if (depth > 8 || !obj) return;
+  if (typeof obj === 'string') {
+    if (obj.startsWith('/') && obj.length > 1 && !skipExt.test(obj)) {
+      const norm = normalizeUrl(obj, origin, origin);
+      if (norm) found.add(norm);
+    }
+    return;
+  }
+  if (Array.isArray(obj)) {
+    obj.slice(0, 50).forEach(v => extractUrlsFromObj(v, origin, found, depth + 1));
+    return;
+  }
+  if (typeof obj === 'object') {
+    Object.values(obj).slice(0, 50).forEach(v => extractUrlsFromObj(v, origin, found, depth + 1));
+  }
+}
+
+/* ═══════════════════════════════════
+   CRAWLER ENGINE — FIXED
+═══════════════════════════════════ */
+async function crawlSite(startUrl, maxPages, concurrency) {
+  const visited = new Set();
+  const queue = [];
+  let crawled = 0;
+  let activeWorkers = 0;
+  const origin = getOrigin(startUrl);
+
+  // ── STEP 1: Try sitemap first (solves JS-rendered sites) ──
+  const sitemapUrls = await fetchSitemap(startUrl);
+  if (sitemapUrls.size > 0) {
+    setProgress(0, sitemapUrls.size, maxPages, `🗺️ ${sitemapUrls.size} URLs from sitemap — starting crawl…`);
+    // Add sitemap URLs to queue (respect maxPages limit)
+    const sitemapArr = [...sitemapUrls].slice(0, maxPages * 2);
+    // Always crawl startUrl first
+    queue.push(startUrl);
+    sitemapArr.forEach(u => { if (u !== startUrl) queue.push(u); });
+  } else {
+    queue.push(startUrl);
+    setProgress(0, 1, maxPages, '🌐 No sitemap found — crawling via link discovery…');
+  }
+
+  // ── STEP 2: BFS Crawler ──
+  async function worker() {
+    activeWorkers++;
+    while (!stopFlag) {
+      // Exit conditions
+      if (crawled >= maxPages) break;
+
+      // Wait briefly if queue empty but other workers might still be adding URLs
+      if (queue.length === 0) {
+        if (activeWorkers <= 1) break; // last worker, no more URLs coming
+        await sleep(300);
+        continue;
+      }
+
+      const url = queue.shift();
+      if (!url || visited.has(url)) continue;
+      visited.add(url);
+
+      document.getElementById('sb-queue').textContent = queue.length;
+      setProgress(crawled, queue.length, maxPages,
+        `🕷️ [${crawled}/${maxPages}] ${url.length > 65 ? url.slice(0, 65) + '…' : url}`);
+
+      const { ok, status, text, ms } = await fetchPage(url);
+      crawled++;
+
+      let page;
+      if (ok && text && text.length > 50) {
+        try {
+          page = parsePage(url, text, status || 200, ms);
+          // Add newly discovered URLs to queue
+          page._discovered.forEach(u => {
+            if (!visited.has(u) && !queue.includes(u) && (crawled + queue.length) < maxPages * 3) {
+              queue.push(u);
+            }
+          });
+        } catch (e) {
+          page = errorPage(url, status, ms, `Parse error: ${e.message}`);
+        }
+      } else {
+        page = errorPage(url, status || 0, ms, status === 0 ? 'All proxies failed / timeout' : `HTTP ${status}`);
+      }
+
+      results.push(page);
+      applyFilter();
+      updateStatusBar();
+      if (results.length % 5 === 0 || results.length <= 5) renderTab();
+    }
+    activeWorkers--;
+  }
+
+  const workers = Array.from({ length: concurrency }, () => worker());
+  await Promise.all(workers);
+}
+
+function errorPage(url, status, ms, errMsg) {
+  return {
+    url, status_code: status, ms,
+    title: '', tl: 0, metaDesc: '', dl: 0,
+    h1: '', h1c: 0, h2c: 0, h3c: 0, wordCount: 0,
+    canonical: '', hasCanonical: false,
+    robotsMeta: '', noindex: false, nofollow: false,
+    lang: '', charset: '', viewport: false,
+    imgCount: 0, missingAlt: 0, largeImgs: 0,
+    intLinks: 0, extLinks: 0,
+    isHttps: url.startsWith('https://'),
+    hasSchema: false, schemaTypes: [],
+    hasOG: false, ogTitle: '', ogImage: '', twitterCard: '',
+    hreflangCount: 0, pageSizeKb: 0,
+    issues: [{ t: 'error', cat: 'Fetch', msg: errMsg }],
+    _discovered: [],
+  };
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/* ═══════════════════════════════════
+   CRAWL CONTROL
+═══════════════════════════════════ */
+async function toggleCrawl() {
+  if (crawling) { stopCrawl(); return; }
+
+  let url = document.getElementById('url-input').value.trim();
+  if (!url) { alert('Please enter a URL to crawl.'); return; }
+  if (!url.startsWith('http')) url = 'https://' + url;
+  try { new URL(url); } catch { alert('Invalid URL. Please include https://'); return; }
+
+  results = []; filteredResults = []; selectedRow = null;
+  stopFlag = false; crawling = true;
+  sortKey = null; sortAsc = true;
+  closeDetail();
+
+  const maxPages = parseInt(document.getElementById('max-pages-sel').value);
+  const concurrency = parseInt(document.getElementById('concurrency-sel').value);
+
+  document.getElementById('btn-start').innerHTML = '<span class="spinning">⏹</span> Stop';
+  document.getElementById('btn-start').classList.add('stopping');
+  document.getElementById('progressbar').classList.add('visible');
+  document.getElementById('btn-export').style.display = 'none';
+  document.getElementById('filter-input').style.display = 'none';
+  document.getElementById('filter-status').style.display = 'none';
+  document.getElementById('filter-input').value = '';
+  document.getElementById('filter-status').value = 'all';
+  document.getElementById('sb-queue').textContent = '0';
+
+  setProgress(0, 0, maxPages, '🚀 Starting crawl engine…');
+  updateStatusBar();
+  renderTab();
+
+  await crawlSite(url, maxPages, concurrency);
+
+  crawling = false; stopFlag = false;
+  document.getElementById('btn-start').innerHTML = '▶ Start Crawl';
+  document.getElementById('btn-start').classList.remove('stopping');
+  document.getElementById('btn-export').style.display = results.length ? '' : 'none';
+  document.getElementById('filter-input').style.display = results.length ? '' : 'none';
+  document.getElementById('filter-status').style.display = results.length ? '' : 'none';
+  setProgress(100, 0, 100, `✅ Done — ${results.length} URLs crawled`);
+  renderTab();
+}
+
+function stopCrawl() { stopFlag = true; crawling = false; }
+
+/* ═══════════════════════════════════
+   PROGRESS
+═══════════════════════════════════ */
+function setProgress(done, queued, total, msg) {
+  const pct = total > 0 ? Math.min(100, Math.round(done / total * 100)) : 0;
+  document.getElementById('prog-fill').style.width = pct + '%';
+  document.getElementById('prog-label').textContent = msg || '';
+}
+
+/* ═══════════════════════════════════
+   STATUS BAR
+═══════════════════════════════════ */
+function updateStatusBar() {
+  const R = results;
+  document.getElementById('sb-urls').textContent = R.length;
+  document.getElementById('sb-ok').textContent = R.filter(r => r.status_code >= 200 && r.status_code < 300).length;
+  document.getElementById('sb-err').textContent = R.reduce((a, r) => a + r.issues.filter(i => i.t === 'error').length, 0);
+  document.getElementById('sb-warn').textContent = R.reduce((a, r) => a + r.issues.filter(i => i.t === 'warning').length, 0);
+  document.getElementById('sb-notitle').textContent = R.filter(r => !r.title).length;
+  document.getElementById('sb-noh1').textContent = R.filter(r => r.h1c === 0).length;
+  document.getElementById('sb-alt').textContent = R.reduce((a, r) => a + (r.missingAlt || 0), 0);
+}
+
+/* ═══════════════════════════════════
+   FILTER + SORT
+═══════════════════════════════════ */
+function applyFilter() {
+  const q = (document.getElementById('filter-input').value || '').toLowerCase();
+  const fs = document.getElementById('filter-status').value;
+  let rows = [...results];
+  if (q) rows = rows.filter(r => r.url.toLowerCase().includes(q) || (r.title || '').toLowerCase().includes(q));
+  if (fs === 'errors')   rows = rows.filter(r => r.issues.some(i => i.t === 'error'));
+  else if (fs === 'warnings') rows = rows.filter(r => r.issues.some(i => i.t === 'warning'));
+  else if (fs === 'ok')  rows = rows.filter(r => !r.issues.some(i => i.t === 'error' || i.t === 'warning'));
+  else if (fs === '2xx') rows = rows.filter(r => r.status_code >= 200 && r.status_code < 300);
+  else if (fs === '3xx') rows = rows.filter(r => r.status_code >= 300 && r.status_code < 400);
+  else if (fs === '4xx') rows = rows.filter(r => r.status_code >= 400 && r.status_code < 500);
+  if (sortKey) rows.sort((a, b) => {
+    const av = a[sortKey] ?? '', bv = b[sortKey] ?? '';
+    return sortAsc ? (av > bv ? 1 : av < bv ? -1 : 0) : (av < bv ? 1 : av > bv ? -1 : 0);
+  });
+  filteredResults = rows;
+}
+
+/* ═══════════════════════════════════
+   TABS
+═══════════════════════════════════ */
+function initTabs() {
+  const bar = document.getElementById('tabbar');
+  bar.innerHTML = '';
+  TABS.forEach(t => {
+    const btn = document.createElement('button');
+    btn.className = 'tab-btn' + (t.id === activeTab ? ' active' : '');
+    btn.textContent = t.label;
+    btn.onclick = () => switchTab(t.id);
+    bar.appendChild(btn);
+  });
+}
+function switchTab(id) {
+  activeTab = id;
+  document.querySelectorAll('.tab-btn').forEach((b, i) => b.classList.toggle('active', TABS[i].id === id));
+  renderTab();
+}
+function renderTab() {
+  const content = document.getElementById('content');
+  if (!results.length && !crawling) { content.innerHTML = welcomeHTML(); return; }
+  const R = filteredResults;
+  switch (activeTab) {
+    case 'overview':   content.innerHTML = overviewTab(R); break;
+    case 'titles':     content.innerHTML = titlesTab(R); break;
+    case 'meta':       content.innerHTML = metaTab(R); break;
+    case 'h1':         content.innerHTML = h1Tab(R); break;
+    case 'response':   content.innerHTML = responseTab(R); break;
+    case 'images':     content.innerHTML = imagesTab(R); break;
+    case 'links':      content.innerHTML = linksTab(R); break;
+    case 'canonical':  content.innerHTML = canonicalTab(R); break;
+    case 'directives': content.innerHTML = directivesTab(R); break;
+    case 'schema':     content.innerHTML = schemaTab(R); break;
+    case 'security':   content.innerHTML = securityTab(R); break;
+    case 'issues':     content.innerHTML = issuesTab(R); break;
+  }
+}
+
+/* ═══════════════════════════════════
+   WELCOME SCREEN
+═══════════════════════════════════ */
+function welcomeHTML() {
+  return `<div id="welcome">
+  <span class="w-icon">🐸</span>
+  <h2>Enter a URL above and click ▶ Start Crawl</h2>
+  <p>SEO Spider Pro first reads your sitemap.xml to discover all URLs instantly — even on JavaScript / React / Next.js sites like foodmamba.com. Then crawls every page in parallel.</p>
+  <div class="feature-grid">
+    ${[['🗺️','Sitemap Support','Reads sitemap.xml first for fast URL discovery'],['⚛️','JS Site Support','Extracts links from Next.js, React, JSON data'],['🔗','Link Discovery','Finds links in HTML + embedded JavaScript'],['📝','On-Page SEO','Titles, metas, H1 headings'],['🖼','Images','Alt text & oversized images'],['📊','Schema / OG','JSON-LD + Open Graph detection']].map(([i, t, d]) =>
+      `<div class="feature-card"><div class="fi">${i}</div><div class="ft">${t}</div><div class="fd">${d}</div></div>`).join('')}
+  </div>
+</div>`;
+}
+
+/* ═══════════════════════════════════
+   HELPERS
+═══════════════════════════════════ */
+const tr = (s, n = 55) => (!s ? '—' : s.length > n ? s.slice(0, n) + '…' : s);
+const sc = c => !c ? '#444' : c >= 200 && c < 300 ? '#22c55e' : c >= 300 && c < 400 ? '#facc15' : c >= 400 ? '#f87171' : '#666';
+const lc = (n, warn, err) => !n ? '#444' : n > err ? '#f87171' : n > warn ? '#facc15' : '#22c55e';
+const esc = s => (s || '').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+function iss(issues) {
+  const e = issues.filter(i => i.t === 'error').length;
+  const w = issues.filter(i => i.t === 'warning').length;
+  if (e > 0) return `<span style="color:#f87171">⛔${e}</span>${w > 0 ? ` <span style="color:#facc15">⚠${w}</span>` : ''}`;
+  if (w > 0) return `<span style="color:#facc15">⚠${w}</span>`;
+  return `<span style="color:#22c55e">✔</span>`;
+}
+
+function statCards(cards, cls) {
+  return `<div class="stat-grid ${cls}">
+    ${cards.map(([lbl, val, color, sub]) => `
+      <div class="stat-card">
+        <div class="stat-val" style="color:${color}">${val ?? 0}</div>
+        <div class="stat-lbl">${lbl}</div>
+        ${sub ? `<div class="stat-sub">${sub}</div>` : ''}
+      </div>`).join('')}
+  </div>`;
+}
+
+/* ═══════════════════════════════════
+   VIRTUAL TABLE ENGINE
+═══════════════════════════════════ */
+const ROW_H = 32;
+function buildTable(id, cols, rows) {
+  const totalW = cols.reduce((a, c) => a + (c.w || 120), 0);
+  const headCells = cols.map(c =>
+    `<div class="vtable-head-cell" style="min-width:${c.w||120}px;max-width:${c.w||120}px" onclick="handleSort('${c.key||''}',this)">
+      ${c.label}${c.key && sortKey === c.key ? (sortAsc ? ' ↑' : ' ↓') : ''}
+    </div>`).join('');
+
+  const html = `<div class="vtable-wrap">
+    <div class="vtable-head" style="min-width:${totalW}px">${headCells}</div>
+    <div class="vtable-scroll" id="${id}-scroll">
+      <div id="${id}-top"></div>
+      <div id="${id}-rows"></div>
+      <div id="${id}-bot"></div>
+    </div>
+  </div>`;
+
+  setTimeout(() => {
+    const scroller = document.getElementById(`${id}-scroll`);
+    if (!scroller) return;
+    const vis = Math.ceil((scroller.clientHeight || 420) / ROW_H) + 6;
+
+    function render(scrollTop) {
+      const start = Math.max(0, Math.floor(scrollTop / ROW_H) - 2);
+      const end = Math.min(rows.length, start + vis);
+      const top = document.getElementById(`${id}-top`);
+      const bot = document.getElementById(`${id}-bot`);
+      const container = document.getElementById(`${id}-rows`);
+      if (!top || !bot || !container) return;
+      top.style.height = (start * ROW_H) + 'px';
+      bot.style.height = ((rows.length - end) * ROW_H) + 'px';
+      container.innerHTML = rows.slice(start, end).map((row, i) => {
+        const idx = start + i;
+        const sel = selectedRow && selectedRow.url === row.url;
+        const bg = sel ? '#122040' : idx % 2 === 0 ? '#0a1020' : '#080d18';
+        return `<div class="vtable-row${sel ? ' selected' : ''}" style="background:${bg};height:${ROW_H}px" data-idx="${idx}">
+          ${cols.map(c => {
+            let v = '—';
+            if (c.render) v = c.render(row);
+            else if (c.key !== undefined && row[c.key] !== undefined && row[c.key] !== '') v = tr(String(row[c.key]), (c.w||120)/7);
+            return `<div class="vtable-cell" style="min-width:${c.w||120}px;max-width:${c.w||120}px">${v}</div>`;
+          }).join('')}
+        </div>`;
+      }).join('');
+      container.querySelectorAll('.vtable-row').forEach(el => {
+        el.addEventListener('click', () => {
+          const row2 = rows[parseInt(el.dataset.idx)];
+          if (row2) { selectedRow = row2; showDetail(row2); render(scroller.scrollTop); }
+        });
+      });
+    }
+    scroller.addEventListener('scroll', () => render(scroller.scrollTop), { passive: true });
+    render(0);
+  }, 0);
+  return html;
+}
+
+function handleSort(key) {
+  if (!key) return;
+  if (sortKey === key) sortAsc = !sortAsc; else { sortKey = key; sortAsc = true; }
+  applyFilter(); renderTab();
+}
+
+/* ═══════════════════════════════════
+   TAB RENDERERS
+═══════════════════════════════════ */
+function overviewTab(R) {
+  const ok = R.filter(r => r.status_code >= 200 && r.status_code < 300).length;
+  const redir = R.filter(r => r.status_code >= 300 && r.status_code < 400).length;
+  const e4 = R.filter(r => r.status_code >= 400 && r.status_code < 500).length;
+  const fail = R.filter(r => r.status_code === 0).length;
+  const totalErr = R.reduce((a, r) => a + r.issues.filter(i => i.t === 'error').length, 0);
+  const totalWarn = R.reduce((a, r) => a + r.issues.filter(i => i.t === 'warning').length, 0);
+  const avgLoad = R.length ? Math.round(R.reduce((a, r) => a + (r.ms || 0), 0) / R.length) : 0;
+  const cols = [
+    { label: 'URL', key: 'url', w: 260, render: r => `<a href="${esc(r.url)}" target="_blank" rel="noopener" style="color:#60a5fa;font-size:.68rem" onclick="event.stopPropagation()">${tr(r.url, 36)}</a>` },
+    { label: 'Status', key: 'status_code', w: 72, render: r => `<b style="color:${sc(r.status_code)};font-family:var(--mono);font-size:.8rem">${r.status_code || '—'}</b>` },
+    { label: 'Title', key: 'title', w: 200, render: r => `<span style="color:${r.title ? '#c9d1d9' : '#f87171'};font-size:.7rem">${tr(r.title, 28) || '⛔ MISSING'}</span>` },
+    { label: 'T.Len', key: 'tl', w: 58, render: r => `<span style="color:${lc(r.tl,60,70)};font-family:var(--mono)">${r.tl || '—'}</span>` },
+    { label: 'M.Len', key: 'dl', w: 58, render: r => `<span style="color:${lc(r.dl,155,165)};font-family:var(--mono)">${r.dl || '—'}</span>` },
+    { label: 'Words', key: 'wordCount', w: 65, render: r => `<span style="color:#556070;font-family:var(--mono)">${r.wordCount}</span>` },
+    { label: 'Imgs', key: 'imgCount', w: 50, render: r => `<span style="color:#556070;font-family:var(--mono)">${r.imgCount}</span>` },
+    { label: 'Issues', w: 90, render: r => iss(r.issues) },
+    { label: 'ms', key: 'ms', w: 60, render: r => `<span style="color:${r.ms > 3000 ? '#f87171' : r.ms > 1500 ? '#facc15' : '#3a6070'};font-family:var(--mono)">${r.ms}</span>` },
+  ];
+  return statCards([
+    ['URLs Crawled', R.length, '#60a5fa', `${avgLoad}ms avg load`],
+    ['2xx OK', ok, '#22c55e', `${redir} redirects`],
+    ['Errors Found', totalErr, '#f87171', `${e4} 4xx · ${fail} failed`],
+    ['Warnings', totalWarn, '#facc15', `${R.filter(r => !r.title).length} no title`],
+  ], 'stat-grid-4') + buildTable('ov', cols, R);
+}
+
+function titlesTab(R) {
+  const missing = R.filter(r => !r.title).length;
+  const long = R.filter(r => r.tl > 70).length;
+  const short = R.filter(r => r.title && r.tl < 30).length;
+  const cols = [
+    { label: 'URL', key: 'url', w: 240, render: r => `<span style="color:#60a5fa;font-size:.68rem">${tr(r.url, 33)}</span>` },
+    { label: 'Title', key: 'title', w: 290, render: r => `<span style="color:${r.title ? '#c9d1d9' : '#f87171'};font-size:.7rem">${tr(r.title, 40) || '⛔ MISSING'}</span>` },
+    { label: 'Chars', key: 'tl', w: 65, render: r => `<b style="color:${lc(r.tl,60,70)};font-family:var(--mono)">${r.tl || 0}</b>` },
+    { label: 'Issue', w: 160, render: r => !r.title ? `<span style="color:#f87171">Missing</span>` : r.tl > 70 ? `<span style="color:#f87171">Too Long (${r.tl})</span>` : r.tl < 30 ? `<span style="color:#facc15">Too Short</span>` : `<span style="color:#22c55e">✔ OK</span>` },
+    { label: 'Status', key: 'status_code', w: 70, render: r => `<b style="color:${sc(r.status_code)};font-family:var(--mono)">${r.status_code}</b>` },
+  ];
+  return statCards([['Missing', missing, '#f87171'], ['Too Long >70', long, '#facc15'], ['Too Short <30', short, '#fb923c'], ['OK', R.length - missing - long - short, '#22c55e']], 'stat-grid-4') + buildTable('tt', cols, R);
+}
+
+function metaTab(R) {
+  const missing = R.filter(r => !r.metaDesc).length;
+  const long = R.filter(r => r.dl > 165).length;
+  const short = R.filter(r => r.metaDesc && r.dl < 70).length;
+  const cols = [
+    { label: 'URL', key: 'url', w: 220, render: r => `<span style="color:#60a5fa;font-size:.68rem">${tr(r.url, 30)}</span>` },
+    { label: 'Meta Description', key: 'metaDesc', w: 320, render: r => `<span style="color:${r.metaDesc ? '#c9d1d9' : '#f87171'};font-size:.7rem">${tr(r.metaDesc, 45) || '⛔ MISSING'}</span>` },
+    { label: 'Chars', key: 'dl', w: 65, render: r => `<b style="color:${lc(r.dl,155,165)};font-family:var(--mono)">${r.dl || 0}</b>` },
+    { label: 'Issue', w: 150, render: r => !r.metaDesc ? `<span style="color:#f87171">Missing</span>` : r.dl > 165 ? `<span style="color:#f87171">Too Long</span>` : r.dl < 70 ? `<span style="color:#facc15">Too Short</span>` : `<span style="color:#22c55e">✔ OK</span>` },
+  ];
+  return statCards([['Missing', missing, '#f87171'], ['Too Long >165', long, '#facc15'], ['Too Short <70', short, '#fb923c'], ['OK', R.length - missing - long - short, '#22c55e']], 'stat-grid-4') + buildTable('mt', cols, R);
+}
+
+function h1Tab(R) {
+  const miss = R.filter(r => r.h1c === 0).length;
+  const multi = R.filter(r => r.h1c > 1).length;
+  const cols = [
+    { label: 'URL', key: 'url', w: 220, render: r => `<span style="color:#60a5fa;font-size:.68rem">${tr(r.url, 30)}</span>` },
+    { label: 'H1', key: 'h1', w: 270, render: r => `<span style="color:${r.h1 ? '#c9d1d9' : '#f87171'};font-size:.7rem">${tr(r.h1, 37) || '⛔ MISSING'}</span>` },
+    { label: 'H1#', key: 'h1c', w: 50, render: r => `<span style="color:${r.h1c > 1 ? '#facc15' : r.h1c === 0 ? '#f87171' : '#22c55e'};font-family:var(--mono)">${r.h1c}</span>` },
+    { label: 'H2#', key: 'h2c', w: 50, render: r => `<span style="color:#556070;font-family:var(--mono)">${r.h2c}</span>` },
+    { label: 'H3#', key: 'h3c', w: 50, render: r => `<span style="color:#556070;font-family:var(--mono)">${r.h3c}</span>` },
+    { label: 'Issue', w: 160, render: r => r.h1c === 0 ? `<span style="color:#f87171">Missing H1</span>` : r.h1c > 1 ? `<span style="color:#facc15">Multiple H1 (${r.h1c})</span>` : `<span style="color:#22c55e">✔ OK</span>` },
+  ];
+  return statCards([['Missing H1', miss, '#f87171'], ['Multiple H1', multi, '#facc15'], ['OK', R.length - miss - multi, '#22c55e'], ['Avg H2/Page', R.length ? Math.round(R.reduce((a, r) => a + r.h2c, 0) / R.length) : 0, '#60a5fa']], 'stat-grid-4') + buildTable('h1t', cols, R);
+}
+
+function responseTab(R) {
+  const ok = R.filter(r => r.status_code >= 200 && r.status_code < 300).length;
+  const r3 = R.filter(r => r.status_code >= 300 && r.status_code < 400).length;
+  const r4 = R.filter(r => r.status_code >= 400 && r.status_code < 500).length;
+  const r5 = R.filter(r => r.status_code >= 500).length;
+  const fail = R.filter(r => r.status_code === 0).length;
+  const cols = [
+    { label: 'URL', key: 'url', w: 300, render: r => `<a href="${esc(r.url)}" target="_blank" rel="noopener" style="color:#60a5fa;font-size:.68rem" onclick="event.stopPropagation()">${tr(r.url, 42)}</a>` },
+    { label: 'Status', key: 'status_code', w: 80, render: r => `<b style="color:${sc(r.status_code)};font-family:var(--mono);font-size:.9rem">${r.status_code || '—'}</b>` },
+    { label: 'HTTPS', key: 'isHttps', w: 70, render: r => r.isHttps ? `<span style="color:#22c55e">✔</span>` : `<span style="color:#f87171">✘</span>` },
+    { label: 'Size KB', key: 'pageSizeKb', w: 75, render: r => `<span style="color:${r.pageSizeKb > 300 ? '#facc15' : '#3a6070'};font-family:var(--mono)">${r.pageSizeKb || '—'}</span>` },
+    { label: 'Load ms', key: 'ms', w: 75, render: r => `<span style="color:${r.ms > 3000 ? '#f87171' : r.ms > 1500 ? '#facc15' : '#22c55e'};font-family:var(--mono)">${r.ms}</span>` },
+    { label: 'Words', key: 'wordCount', w: 65, render: r => `<span style="color:#3a5060;font-family:var(--mono)">${r.wordCount}</span>` },
+  ];
+  return statCards([['2xx OK', ok, '#22c55e'], ['3xx Redirect', r3, '#facc15'], ['4xx Error', r4, '#f87171'], ['5xx Error', r5, '#dc2626'], ['Failed', fail, '#6b7280']], 'stat-grid-5') + buildTable('rt', cols, R);
+}
+
+function imagesTab(R) {
+  const cols = [
+    { label: 'URL', key: 'url', w: 280, render: r => `<span style="color:#60a5fa;font-size:.68rem">${tr(r.url, 38)}</span>` },
+    { label: 'Images', key: 'imgCount', w: 70, render: r => `<span style="color:#c9d1d9;font-family:var(--mono)">${r.imgCount}</span>` },
+    { label: 'No Alt', key: 'missingAlt', w: 65, render: r => `<b style="color:${r.missingAlt > 0 ? '#f87171' : '#22c55e'};font-family:var(--mono)">${r.missingAlt}</b>` },
+    { label: 'Large', key: 'largeImgs', w: 60, render: r => `<span style="color:${r.largeImgs > 0 ? '#facc15' : '#3a5060'};font-family:var(--mono)">${r.largeImgs}</span>` },
+    { label: 'Issue', w: 200, render: r => { const p = []; if (r.missingAlt > 0) p.push(`<span style="color:#facc15">${r.missingAlt} missing alt</span>`); if (r.largeImgs > 0) p.push(`<span style="color:#fb923c">${r.largeImgs} large</span>`); return p.join(' · ') || `<span style="color:#22c55e">✔ OK</span>`; } },
+  ];
+  return statCards([['Total Images', R.reduce((a,r)=>a+r.imgCount,0), '#60a5fa'], ['Missing Alt', R.reduce((a,r)=>a+r.missingAlt,0), '#f87171'], ['Pages w/ Imgs', R.filter(r=>r.imgCount>0).length, '#22c55e'], ['Large Imgs', R.reduce((a,r)=>a+r.largeImgs,0), '#facc15']], 'stat-grid-4') + buildTable('img', cols, R);
+}
+
+function linksTab(R) {
+  const cols = [
+    { label: 'URL', key: 'url', w: 300, render: r => `<span style="color:#60a5fa;font-size:.68rem">${tr(r.url, 42)}</span>` },
+    { label: 'Internal', key: 'intLinks', w: 85, render: r => `<span style="color:#60a5fa;font-family:var(--mono)">${r.intLinks}</span>` },
+    { label: 'External', key: 'extLinks', w: 85, render: r => `<span style="color:#a78bfa;font-family:var(--mono)">${r.extLinks}</span>` },
+    { label: 'NoFollow', key: 'nofollow', w: 85, render: r => r.nofollow ? `<span style="color:#facc15">NoFollow</span>` : `<span style="color:#22c55e">Follow</span>` },
+  ];
+  return statCards([['Total Internal', R.reduce((a,r)=>a+r.intLinks,0), '#60a5fa'], ['Total External', R.reduce((a,r)=>a+r.extLinks,0), '#a78bfa'], ['Avg Int/Page', R.length ? Math.round(R.reduce((a,r)=>a+r.intLinks,0)/R.length) : 0, '#38bdf8']], 'stat-grid-3') + buildTable('lnk', cols, R);
+}
+
+function canonicalTab(R) {
+  const nocan = R.filter(r => !r.hasCanonical).length;
+  const nonself = R.filter(r => r.canonical && r.canonical !== r.url).length;
+  const cols = [
+    { label: 'URL', key: 'url', w: 230, render: r => `<span style="color:#60a5fa;font-size:.68rem">${tr(r.url, 32)}</span>` },
+    { label: 'Canonical URL', key: 'canonical', w: 250, render: r => `<span style="color:#8aa8c0;font-size:.68rem">${tr(r.canonical, 35) || '—'}</span>` },
+    { label: 'Has Tag', key: 'hasCanonical', w: 80, render: r => r.hasCanonical ? `<span style="color:#22c55e">✔ Yes</span>` : `<span style="color:#f87171">✘ No</span>` },
+    { label: 'Issue', w: 160, render: r => !r.hasCanonical ? `<span style="color:#f87171">Missing canonical</span>` : r.canonical !== r.url ? `<span style="color:#facc15">Points elsewhere</span>` : `<span style="color:#22c55e">✔ Self-canonical</span>` },
+  ];
+  return statCards([['No Canonical', nocan, '#f87171'], ['Has Canonical', R.length - nocan, '#22c55e'], ['Non-self', nonself, '#facc15']], 'stat-grid-3') + buildTable('can', cols, R);
+}
+
+function directivesTab(R) {
+  const cols = [
+    { label: 'URL', key: 'url', w: 240, render: r => `<span style="color:#60a5fa;font-size:.68rem">${tr(r.url, 33)}</span>` },
+    { label: 'Meta Robots', key: 'robotsMeta', w: 145, render: r => `<code style="color:#a8b8cc;font-size:.68rem;background:#1a2535;padding:1px 5px;border-radius:3px">${r.robotsMeta || '—'}</code>` },
+    { label: 'NoIndex', key: 'noindex', w: 80, render: r => r.noindex ? `<b style="color:#f87171">✘ NoIndex</b>` : `<span style="color:#22c55e">✔</span>` },
+    { label: 'NoFollow', key: 'nofollow', w: 80, render: r => r.nofollow ? `<b style="color:#facc15">NoFollow</b>` : `<span style="color:#22c55e">Follow</span>` },
+    { label: 'Lang', key: 'lang', w: 60, render: r => `<span style="color:#556070">${r.lang || '—'}</span>` },
+    { label: 'hreflang', key: 'hreflangCount', w: 80, render: r => `<span style="color:${r.hreflangCount > 0 ? '#22c55e' : '#3a5060'};font-family:var(--mono)">${r.hreflangCount}</span>` },
+    { label: 'Viewport', key: 'viewport', w: 75, render: r => r.viewport ? `<span style="color:#22c55e">✔</span>` : `<span style="color:#facc15">✘</span>` },
+  ];
+  return statCards([['Noindex', R.filter(r=>r.noindex).length, '#f87171'], ['Nofollow', R.filter(r=>r.nofollow).length, '#facc15'], ['Has Viewport', R.filter(r=>r.viewport).length, '#22c55e'], ['Has hreflang', R.filter(r=>r.hreflangCount>0).length, '#60a5fa']], 'stat-grid-4') + buildTable('dir', cols, R);
+}
+
+function schemaTab(R) {
+  const cols = [
+    { label: 'URL', key: 'url', w: 230, render: r => `<span style="color:#60a5fa;font-size:.68rem">${tr(r.url, 32)}</span>` },
+    { label: 'Schema', key: 'hasSchema', w: 75, render: r => r.hasSchema ? `<span style="color:#22c55e">✔ Yes</span>` : `<span style="color:#f87171">✘ No</span>` },
+    { label: 'Schema Types', w: 190, render: r => `<span style="color:#8aa8c0;font-size:.68rem">${r.schemaTypes.join(', ') || '—'}</span>` },
+    { label: 'Open Graph', key: 'hasOG', w: 95, render: r => r.hasOG ? `<span style="color:#22c55e">✔ Yes</span>` : `<span style="color:#facc15">✘ No</span>` },
+    { label: 'Twitter Card', key: 'twitterCard', w: 100, render: r => r.twitterCard ? `<span style="color:#22c55e">✔</span>` : `<span style="color:#3a5060">—</span>` },
+  ];
+  return statCards([['No Schema', R.filter(r=>!r.hasSchema).length, '#f87171'], ['Has Schema', R.filter(r=>r.hasSchema).length, '#22c55e'], ['No OG', R.filter(r=>!r.hasOG).length, '#facc15'], ['Has OG', R.filter(r=>r.hasOG).length, '#60a5fa']], 'stat-grid-4') + buildTable('sch', cols, R);
+}
+
+function securityTab(R) {
+  const cols = [
+    { label: 'URL', key: 'url', w: 300, render: r => `<span style="color:#60a5fa;font-size:.68rem">${tr(r.url, 42)}</span>` },
+    { label: 'HTTPS', key: 'isHttps', w: 90, render: r => r.isHttps ? `<b style="color:#22c55e">✔ Secure</b>` : `<b style="color:#f87171">✘ HTTP</b>` },
+    { label: 'Viewport', key: 'viewport', w: 80, render: r => r.viewport ? `<span style="color:#22c55e">✔</span>` : `<span style="color:#facc15">✘</span>` },
+    { label: 'Charset', key: 'charset', w: 90, render: r => `<span style="color:#3a5060;font-family:var(--mono)">${r.charset || '—'}</span>` },
+    { label: 'Size KB', key: 'pageSizeKb', w: 75, render: r => `<span style="color:${r.pageSizeKb > 500 ? '#f87171' : r.pageSizeKb > 200 ? '#facc15' : '#3a5060'};font-family:var(--mono)">${r.pageSizeKb || '—'}</span>` },
+    { label: 'Load ms', key: 'ms', w: 75, render: r => `<span style="color:${r.ms > 3000 ? '#f87171' : r.ms > 1500 ? '#facc15' : '#22c55e'};font-family:var(--mono)">${r.ms}</span>` },
+  ];
+  return statCards([['Not HTTPS', R.filter(r=>!r.isHttps).length, '#f87171'], ['Secure', R.filter(r=>r.isHttps).length, '#22c55e'], ['No Viewport', R.filter(r=>!r.viewport).length, '#facc15'], ['Page >500KB', R.filter(r=>r.pageSizeKb>500).length, '#fb923c']], 'stat-grid-4') + buildTable('sec', cols, R);
+}
+
+function issuesTab(R) {
+  const allIssues = R.flatMap(r => r.issues.map(i => ({ ...i, url: r.url })));
+  const errs = allIssues.filter(i => i.t === 'error').length;
+  const warns = allIssues.filter(i => i.t === 'warning').length;
+  const infos = allIssues.filter(i => i.t === 'info').length;
+  const rows = allIssues.map((issue, idx) => {
+    const clr = issue.t === 'error' ? '#f87171' : issue.t === 'warning' ? '#facc15' : '#60a5fa';
+    const bg2 = issue.t === 'error' ? 'rgba(248,113,113,.07)' : issue.t === 'warning' ? 'rgba(250,204,21,.07)' : 'rgba(96,165,250,.07)';
+    const icon = issue.t === 'error' ? '⛔' : issue.t === 'warning' ? '⚠️' : '💡';
+    const bdg = issue.t === 'error' ? 'rgba(248,113,113,.15)' : issue.t === 'warning' ? 'rgba(250,204,21,.15)' : 'rgba(96,165,250,.15)';
+    return `<div class="issue-row" style="background:${idx % 2 === 0 ? '#080d18' : '#060a14'}">
+      <span style="font-size:.9rem;margin-top:1px">${icon}</span>
+      <div style="flex:1;min-width:0">
+        <div class="issue-msg">${issue.msg}</div>
+        <div class="issue-url">${tr(issue.url, 70)}</div>
+      </div>
+      <span class="issue-badge" style="background:${bdg};color:${clr}">${issue.cat || issue.t}</span>
+    </div>`;
+  }).join('');
+  return statCards([['Errors', errs, '#f87171'], ['Warnings', warns, '#facc15'], ['Opportunities', infos, '#60a5fa']], 'stat-grid-3') +
+    `<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;max-height:460px;overflow-y:auto">${rows || `<div class="vtable-empty">No issues yet</div>`}</div>`;
+}
+
+/* ═══════════════════════════════════
+   DETAIL PANEL
+═══════════════════════════════════ */
+function showDetail(r) {
+  document.getElementById('detail-panel').classList.add('open');
+  const rows = [
+    ['HTTP Status', `<span style="color:${sc(r.status_code)};font-weight:700">${r.status_code}</span>`],
+    ['Load Time', `${r.ms} ms`],
+    ['Page Size', `${r.pageSizeKb} KB`],
+    ['Title', tr(r.title, 32)],
+    ['Title Length', `<span style="color:${lc(r.tl,60,70)}">${r.tl} chars</span>`],
+    ['Meta Desc', tr(r.metaDesc, 32)],
+    ['Meta Length', `<span style="color:${lc(r.dl,155,165)}">${r.dl} chars</span>`],
+    ['H1', tr(r.h1, 32) || '<span style="color:#f87171">⛔ Missing</span>'],
+    ['H1 / H2 / H3', `${r.h1c} / ${r.h2c} / ${r.h3c}`],
+    ['Word Count', r.wordCount],
+    ['Images', r.imgCount],
+    ['Missing Alt', `<span style="color:${r.missingAlt > 0 ? '#f87171' : '#22c55e'}">${r.missingAlt}</span>`],
+    ['Internal Links', r.intLinks],
+    ['External Links', r.extLinks],
+    ['HTTPS', r.isHttps ? '✔ Yes' : '<span style="color:#f87171">✘ No</span>'],
+    ['Canonical', tr(r.canonical, 28) || 'None'],
+    ['Meta Robots', r.robotsMeta || 'index, follow'],
+    ['NoIndex', r.noindex ? '<span style="color:#f87171">✘ Yes</span>' : '✔ No'],
+    ['Schema Types', r.schemaTypes.join(', ') || 'None'],
+    ['Open Graph', r.hasOG ? '✔ Yes' : 'No'],
+    ['Twitter Card', r.twitterCard || 'None'],
+    ['Language', r.lang || '—'],
+    ['Viewport', r.viewport ? '✔ Yes' : 'No'],
+    ['hreflang Tags', r.hreflangCount || 0],
+    ['Charset', r.charset || '—'],
+  ];
+  const issueHTML = r.issues.length ? `
+    <div class="det-section">Issues (${r.issues.length})</div>
+    ${r.issues.map(i => {
+      const clr2 = i.t === 'error' ? '#f87171' : i.t === 'warning' ? '#facc15' : '#60a5fa';
+      return `<span class="issue-pill" style="color:${clr2};background:${clr2}11;border-left-color:${clr2}">${i.msg}</span>`;
+    }).join('')}` : '';
+  document.getElementById('detail-inner').innerHTML = `
+    <h3>Page Details <button onclick="closeDetail()">×</button></h3>
+    <a class="det-url" href="${esc(r.url)}" target="_blank" rel="noopener">${r.url}</a>
+    ${rows.map(([k, v]) => `<div class="det-row"><span class="det-key">${k}</span><span class="det-val">${v}</span></div>`).join('')}
+    ${issueHTML}`;
+}
+
+function closeDetail() {
+  selectedRow = null;
+  document.getElementById('detail-panel').classList.remove('open');
+  document.getElementById('detail-inner').innerHTML = '';
+  if (results.length) renderTab();
+}
+
+/* ═══════════════════════════════════
+   CSV EXPORT
+═══════════════════════════════════ */
+function exportCSV() {
+  const headers = ['URL','Status','Load_ms','Title','Title_Length','Meta_Description','Meta_Length','H1','H1_Count','H2_Count','H3_Count','Word_Count','Images','Missing_Alt','Internal_Links','External_Links','Has_Canonical','Canonical_URL','Meta_Robots','NoIndex','NoFollow','Has_Schema','Schema_Types','Open_Graph','Twitter_Card','HTTPS','Viewport','hreflang_Count','Page_Size_KB','Errors','Warnings'];
+  const rows = results.map(r => [
+    `"${r.url}"`, r.status_code, r.ms,
+    `"${(r.title||'').replace(/"/g,'""')}"`, r.tl,
+    `"${(r.metaDesc||'').replace(/"/g,'""')}"`, r.dl,
+    `"${(r.h1||'').replace(/"/g,'""')}"`, r.h1c, r.h2c, r.h3c, r.wordCount,
+    r.imgCount, r.missingAlt, r.intLinks, r.extLinks,
+    r.hasCanonical?1:0, `"${r.canonical||''}"`,
+    `"${r.robotsMeta||''}"`, r.noindex?1:0, r.nofollow?1:0,
+    r.hasSchema?1:0, `"${r.schemaTypes.join('|')}"`,
+    r.hasOG?1:0, `"${r.twitterCard||''}"`,
+    r.isHttps?1:0, r.viewport?1:0, r.hreflangCount, r.pageSizeKb,
+    r.issues.filter(i=>i.t==='error').length,
+    r.issues.filter(i=>i.t==='warning').length,
+  ].join(','));
+  const csv = [headers.join(','), ...rows].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  let hostname = 'site';
+  try { hostname = new URL(results[0].url).hostname; } catch {}
+  a.href = URL.createObjectURL(blob);
+  a.download = `seo-spider-${hostname}-${results.length}urls.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+/* ═══════════════════════════════════
+   MODALS
+═══════════════════════════════════ */
+function showHelp() {
+  document.getElementById('modal-title').textContent = 'How to Use SEO Spider Pro';
+  document.getElementById('modal-body').innerHTML = `
+    <p>SEO Spider Pro is a real website crawler that audits every page for SEO issues.</p>
+    <p><strong>How it crawls JS sites (like foodmamba.com):</strong></p>
+    <ul>
+      <li>First reads <code>sitemap.xml</code> to discover all pages instantly</li>
+      <li>Falls back to extracting links from HTML + embedded JavaScript</li>
+      <li>Parses Next.js <code>__NEXT_DATA__</code> JSON for React/Next.js sites</li>
+      <li>Follows relative path patterns found in JS code</li>
+    </ul>
+    <p><strong>Usage:</strong></p>
+    <ul>
+      <li>Enter URL → choose pages (up to 1000) → click ▶ Start Crawl</li>
+      <li>Browse all tabs as crawl runs in real time</li>
+      <li>Click any row to see full page audit in right panel</li>
+      <li>Use filters to find only errors/warnings</li>
+      <li>Export to CSV when done</li>
+    </ul>
+    <p><strong>Tip:</strong> Some sites block CORS proxies. If only 1 page is crawled, the site has strict anti-bot headers. Results are best for your own websites.</p>`;
+  document.getElementById('modal-overlay').classList.add('show');
+}
+function showAbout() {
+  document.getElementById('modal-title').textContent = 'About SEO Spider Pro';
+  document.getElementById('modal-body').innerHTML = `
+    <p>100% browser-based SEO crawler — no installation, no server, no sign-up.</p>
+    <p><strong>Technical stack:</strong></p>
+    <ul>
+      <li>6 CORS proxy fallbacks for maximum compatibility</li>
+      <li>Sitemap.xml + sitemap index parsing</li>
+      <li>robots.txt Sitemap: directive parsing</li>
+      <li>DOMParser for real HTML extraction</li>
+      <li>JS/JSON link extraction for React/Next.js sites</li>
+      <li>Concurrent BFS crawling (up to 10 threads)</li>
+      <li>Virtual table rendering (1000+ rows smooth)</li>
+      <li>CSV export with 30 columns</li>
+    </ul>
+    <p><strong>To deploy:</strong> Upload this single HTML file to any static host — Netlify, GitHub Pages, Vercel, cPanel.</p>`;
+  document.getElementById('modal-overlay').classList.add('show');
+}
+function closeModal() { document.getElementById('modal-overlay').classList.remove('show'); }
+document.getElementById('modal-overlay').addEventListener('click', e => { if (e.target === e.currentTarget) closeModal(); });
+document.getElementById('url-input').addEventListener('keydown', e => { if (e.key === 'Enter') toggleCrawl(); });
+
+/* ═══════════════════════════════════
+   INIT
+═══════════════════════════════════ */
+initTabs();
+renderTab();
+</script>
+</body>
+</html>
